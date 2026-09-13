@@ -11,6 +11,7 @@ it as tools for an agent. Self-contained: engine + weights + data layer + docs.
 | `ktpr_engine.py` | The KTPR calculation. Pure Python stdlib, no deps. |
 | `ktpr_mysql.py` | Live data layer — pulls tournament stats over SSH. |
 | `weights.toml` | **All tunable weights.** Nothing is hard-coded; edit here. |
+| `ktpr_examples.py` | Prints the worked examples in `KTPR_CALCULATION.md` §3 from live data. |
 | `roster.csv` | `steam_id,name,team_name,matches` map for clean display names/teams (live data). **Not tracked in git** — it maps every player's SteamID to every alias they've used, so it stays out of this public repo. Supply your own copy; without it the tools fall back to a name-tag heuristic. |
 | `sample_stats.csv` | A legacy CSV for a zero-config smoke test (no DB needed). |
 | `KTPR_SPEC.md` | Full spec: formulas, column contract, data model. |
