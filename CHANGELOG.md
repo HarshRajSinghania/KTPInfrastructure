@@ -4,6 +4,34 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`, `provision`, `docs`: game hosts rank lowlatency kernels by flavour instead of by menu position (2026-09-13)
+
+Ubuntu's `10_linux` sorts kernels by version first, so a generic kernel published ahead of its
+lowlatency twin becomes GRUB entry 0 and the first entry of the Advanced submenu. Both
+`GRUB_DEFAULT=0` and the runbooks' `saved` + `1>0` canon boot it. Atlanta, Dallas and New York were
+pinned on 2026-09-13 with `/etc/default/grub.d/99-ktp-kernel-flavour.cfg`
+(`GRUB_FLAVOUR_ORDER="lowlatency"`) and `update-grub`.
+
+- `scripts/fix-grub-default-kernel.sh` checks that the default entry boots the newest installed
+  lowlatency kernel, for `GRUB_DEFAULT=0`, `saved` and menu paths by index, title or id, and
+  predicts entry 0 after the next `update-grub` from the installed kernels and
+  `GRUB_FLAVOUR_ORDER`. It no longer fails a correct `GRUB_DEFAULT=0` host as an unresolvable
+  "positional literal". Title and id pins, indexes past the first entry, and a grub without the
+  flavour patch are findings.
+- `--fix` used to run `grub-set-default '1>0'`. It now writes the drop-in and runs `update-grub` on
+  a `GRUB_DEFAULT=0` host, after copying `grub.cfg` to `/root`, then re-audits. It refuses every
+  other shape and never reboots. New `KTP_GRUB_DEFAULT_DIR`, `KTP_GRUB_SORT_VERSION`,
+  `KTP_UPDATE_GRUB` and `KTP_GRUB_BACKUP_DIR` overrides keep the tests off real paths.
+- The tests run against GRUB files from Atlanta (before and after the pin), Chicago and Denver,
+  with filesystem UUIDs replaced, in `tests/fixtures/grub_default_kernel/`.
+- `provision-gameserver.sh` installs the drop-in and sets `GRUB_DEFAULT=0` instead of writing a
+  menu title into `GRUB_DEFAULT`, and `lan-deploy.sh`'s reboot box gives the same fix.
+- `docs/runbooks/GRUB_DEFAULT_KERNEL.md` is rewritten around the drop-in (apply, no-reboot check,
+  rollback, risks). `docs/KERNEL_EXPERIMENT_RUNBOOK.md` drops its `grub-set-default '1>0'` steps.
+  Both keep the old reasoning and say why it was wrong.
+- Deploy: nothing to pull. Chicago still needs the pin, once console access is confirmed. Denver
+  has no generic kernel installed.
+
 ### `scripts`: `report_service generate` reports a match only once every half has closed (2026-09-13)
 
 `ktp_matches` holds one row per half, and discovery tested `end_time` per row,
