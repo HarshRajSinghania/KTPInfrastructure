@@ -41,6 +41,7 @@ from scripts.analytics_report_dto import assert_sanitized, sanitize_report
 from scripts.player_alias import apply_aliases, fetch_alias_index
 from scripts.report_scope import (
     IN_SCOPE, classify, match_scope_columns, print_held)
+from scripts.report_service import _os_user
 
 DATABASE = "hlstatsx"
 # Every kind here is name-keyed; database ids never cross to the website
@@ -67,7 +68,7 @@ def since_arg(value: str) -> str:
 def mysql(query: str) -> str:
     proc = subprocess.run(
         ["mysql", "--batch", "--raw", "--default-character-set=utf8mb4",
-         DATABASE],
+         f"--user={_os_user()}", DATABASE],
         input=query, capture_output=True, text=True, timeout=600,
         encoding="utf-8", errors="replace",
     )
