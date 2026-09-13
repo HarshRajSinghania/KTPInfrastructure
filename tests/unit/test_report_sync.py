@@ -5,7 +5,15 @@ the properties under test here are the ones whose failure is irreversible:
 that the already-synced set is read in full, and that no aggregate reaches
 PostgREST without passing the forbidden-key assertion.
 """
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
+import urllib.error
+from pathlib import Path
 from unittest import mock
 
 from scripts import report_sync
@@ -124,6 +132,58 @@ class TestPendingReports(unittest.TestCase):
         self.assertEqual(len(todo), self.LOCAL - self.SYNCED)
         self.assertEqual(todo[0][0], f"m{self.SYNCED:05d}")
         self.assertTrue(server.calls > 1)
+
+
+class TestReportRowTimestamps(unittest.TestCase):
+    """The row POSTed here is the write. started_at lands in a timestamptz
+    column, so it has to leave carrying an offset: sent naive, Postgres reads
+    league time as UTC and every published label reads four hours early."""
+
+    STARTED = "2026-09-14 21:00:00"
+    MATCH = "1788919258-CHI1"
+
+    def _posted_row(self):
+        posted = []
+        pending = ("match_id\tschema_version\trevision\tmatch_start\t"
+                   "official_start\n"
+                   f"{self.MATCH}\t9\t1\t{self.STARTED}\t{self.STARTED}")
+        report = json.dumps({
+            "schema_version": 9,
+            "generated_at": "2026-09-14T21:05:00+00:00",
+            "match_id": self.MATCH,
+            "quality": {"status": "FAIL", "checks": []},
+            "match": {"map_name": "dod_anzio", "started_at": self.STARTED,
+                      "duration_seconds": 100, "halves_played": 2},
+        })
+
+        def fake_mysql(query):
+            if "ktp_match_reports r" in query:
+                return pending
+            return "report\n" + report
+
+        def fake_supabase(path, method="GET", body=None):
+            if method == "POST":
+                posted.append(body)
+                return None
+            return []
+
+        with mock.patch.object(report_sync, "mysql", fake_mysql):
+            with mock.patch.object(report_sync, "supabase", fake_supabase):
+                report_sync.sync_reports(False, "2026-09-13")
+        return posted[0]
+
+    def test_started_at_is_written_with_its_offset(self):
+        self.assertEqual(self._posted_row()["started_at"],
+                         "2026-09-14T21:00:00-04:00")
+
+    def test_the_naive_league_string_never_reaches_the_column(self):
+        self.assertNotEqual(self._posted_row()["started_at"], self.STARTED)
+
+    def test_generated_at_still_carries_utc(self):
+        """Positive control in the same row: one of these stamps was already
+        right, so finding an offset somewhere would not discriminate."""
+        self.assertEqual(self._posted_row()["generated_at"],
+                         "2026-09-14T21:05:00+00:00")
 
 
 def aggregate_line(kind, payload_json, revision=1):
@@ -317,6 +377,140 @@ class TestMatchTypeScope(unittest.TestCase):
     def test_query_filters_on_the_official_set(self):
         _, seen, _ = self._run()
         self.assertIn("m.match_type IN (0, 4)", seen[0])
+
+
+def http_error(code):
+    return urllib.error.HTTPError("https://x.test/rest/v1/match_report", code,
+                                  "err", {}, io.BytesIO(b""))
+
+
+class Sender:
+    """Stands in for the HTTP round-trip: replays outcomes, counts attempts."""
+
+    def __init__(self, *outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def __call__(self, url, method, data, headers):
+        self.calls += 1
+        outcome = self.outcomes[min(self.calls, len(self.outcomes)) - 1]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class TestTransientReadRetry(unittest.TestCase):
+    """Production shape: a gateway 504 on a GET of an empty table, which the
+    next attempt answers with []."""
+
+    ENV = {"KTP_SUPABASE_URL": "https://x.test", "KTP_SUPABASE_SECRET_KEY": "k"}
+
+    def _call(self, sender, path="/rest/v1/match_report?select=match_id",
+              method="GET", body=None):
+        sleeps, err = [], io.StringIO()
+        with mock.patch.dict("os.environ", self.ENV), \
+                mock.patch.object(report_sync, "_send", sender), \
+                mock.patch.object(report_sync.time, "sleep", sleeps.append), \
+                mock.patch("sys.stderr", err):
+            try:
+                return report_sync.supabase(path, method, body), sleeps, err.getvalue()
+            except Exception as exc:
+                exc.sleeps, exc.stderr = sleeps, err.getvalue()
+                raise
+
+    def test_a_504_on_a_read_is_retried_and_the_run_carries_on(self):
+        sender = Sender(http_error(504), [])
+        got, sleeps, err = self._call(sender)
+        self.assertEqual((got, sender.calls), ([], 2))
+        self.assertEqual(sleeps, [report_sync.READ_RETRY_DELAYS[0]])
+        self.assertIn("HTTP Error 504", err)
+        self.assertIn("retry 1/", err)
+
+    def test_every_retry_is_logged_and_the_query_string_is_not(self):
+        sender = Sender(http_error(502), http_error(503), TimeoutError("t"), [])
+        _, sleeps, err = self._call(sender)
+        self.assertEqual(sleeps, list(report_sync.READ_RETRY_DELAYS))
+        self.assertEqual(err.count("retry "), 3)
+        self.assertNotIn("select=", err)
+
+    def test_a_persistent_outage_still_raises_after_bounded_retries(self):
+        sender = Sender(http_error(504))
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._call(sender)
+        self.assertEqual(sender.calls, len(report_sync.READ_RETRY_DELAYS) + 1)
+        self.assertEqual(ctx.exception.sleeps, list(report_sync.READ_RETRY_DELAYS))
+
+    def test_timeouts_and_dropped_connections_are_retried(self):
+        for exc in (TimeoutError("timed out"),
+                    urllib.error.URLError("connection reset"),
+                    ConnectionResetError("reset")):
+            sender = Sender(exc, [{"kind": "map_profiles"}])
+            got, _, _ = self._call(sender)
+            self.assertEqual((got, sender.calls), ([{"kind": "map_profiles"}], 2))
+
+    def test_a_client_error_is_not_retried(self):
+        """Control: without it, 'retries' could mean retrying everything,
+        including a revoked key that no wait will fix."""
+        for code in (400, 401, 404, 409):
+            sender = Sender(http_error(code), [])
+            with self.assertRaises(urllib.error.HTTPError):
+                self._call(sender)
+            self.assertEqual(sender.calls, 1, code)
+
+    def test_a_post_is_never_retried(self):
+        sender = Sender(http_error(504), None)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._call(sender, "/rest/v1/match_report", "POST", {"match_id": "m"})
+        self.assertEqual((sender.calls, ctx.exception.sleeps), (1, []))
+
+    def test_supabase_all_survives_a_504_on_the_empty_first_page(self):
+        sender = Sender(http_error(504), [])
+        with mock.patch.dict("os.environ", self.ENV), \
+                mock.patch.object(report_sync, "_send", sender), \
+                mock.patch.object(report_sync.time, "sleep", lambda s: None), \
+                mock.patch("sys.stderr", io.StringIO()):
+            self.assertEqual(report_sync.supabase_all("/rest/v1/match_report"), [])
+        self.assertEqual(sender.calls, 2)
+
+    def test_main_fails_when_the_outage_outlasts_the_retries(self):
+        head = "match_id\tschema_version\trevision\tmatch_start\tofficial_start"
+        with mock.patch.dict("os.environ", self.ENV), \
+                mock.patch.object(report_sync, "mysql", lambda q: head), \
+                mock.patch.object(report_sync, "_send", Sender(http_error(504))), \
+                mock.patch.object(report_sync.time, "sleep", lambda s: None), \
+                mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("builtins.print"):
+            with self.assertRaises(urllib.error.HTTPError):
+                report_sync.main(["--since", "2026-09-13"])
+
+
+class TestExceptHook(unittest.TestCase):
+    """Under `python3 -m`, a foreign excepthook (apport, on the data server)
+    must not replace the real traceback."""
+
+    HOOK = ("import sys\n"
+            "sys.excepthook = lambda *a: sys.stderr.write('FOREIGN-HOOK\\n')\n")
+
+    def _run(self, args):
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "sitecustomize.py").write_text(self.HOOK)
+            env = dict(os.environ, PYTHONPATH=tmp, PATH=tmp,
+                       KTP_SUPABASE_URL="https://x.test",
+                       KTP_SUPABASE_SECRET_KEY="k")
+            return subprocess.run([sys.executable, *args], cwd=root, env=env,
+                                  capture_output=True, text=True, timeout=120)
+
+    def test_control_the_injected_hook_is_active(self):
+        proc = self._run(["-c", "raise RuntimeError('control')"])
+        self.assertIn("FOREIGN-HOOK", proc.stderr)
+
+    def test_report_sync_prints_its_own_traceback(self):
+        # PATH holds no mysql binary, so the first query raises.
+        proc = self._run(["-m", "scripts.report_sync", "--since", "2026-09-13"])
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertNotIn("FOREIGN-HOOK", proc.stderr)
+        self.assertIn("Traceback", proc.stderr)
 
 
 if __name__ == "__main__":
