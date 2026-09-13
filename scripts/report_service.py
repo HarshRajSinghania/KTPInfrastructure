@@ -4,11 +4,11 @@ Runs ON the data server (local-socket mysql, no SSH hop), from the repo root:
   python3 -m scripts.report_service --repo . generate
   python3 -m scripts.report_service --repo . aggregate --since 2026-09-13
 
-`generate` discovers matches that have flag-state producer rows and no
-persisted report at the current schema version, runs
-scripts/match_analytics.py::build_report(), and appends one row per report to
-ktp_match_reports (migration 026). Append-only: regeneration writes the next
-revision, never mutates.
+`generate` discovers finished matches that have flag-state producer rows and
+no report at the current schema version written after their last half closed,
+runs scripts/match_analytics.py::build_report(), and appends one row per
+report to ktp_match_reports (migration 026). Append-only: regeneration writes
+the next revision, never mutates.
 
 `aggregate` reads the latest publishable report per match from the table,
 recomputes season aggregates (map profiles, name-keyed head-to-head, and the
@@ -124,26 +124,43 @@ MATCH_TYPE_LABELS = {
 }
 
 
+# Outlasts a half break or a tech pause between halves, so a match waiting on
+# its next half is never mistaken for a finished one.
+SETTLE_MINUTES = 20
+
+
 def _pending_corpus_sql(schema_version: int, since: str | None,
-                        select: str, tail: str) -> str:
+                        select: str, tail: str,
+                        as_of: str | None = None) -> str:
+    """Matches ready for a report, as of `as_of` (server-local) or NOW()."""
     if since is not None and not re.fullmatch(
             r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?", since):
         raise ValueError(f"--since must be 'YYYY-MM-DD' or "
                          f"'YYYY-MM-DD HH:MM:SS', got {since!r}")
+    if as_of is not None and not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", as_of):
+        raise ValueError(f"as_of must be 'YYYY-MM-DD HH:MM:SS', got {as_of!r}")
     since_clause = f"AND m.start_time >= '{since}' " if since else ""
+    now = f"CAST('{as_of}' AS DATETIME)" if as_of else "NOW()"
     return (
         f"SELECT {select} FROM ktp_matches m "
-        "JOIN ktp_flag_state_events f ON BINARY f.match_id = BINARY m.match_id "
-        "LEFT JOIN ktp_match_reports r ON BINARY r.match_id = BINARY m.match_id "
+        # ktp_matches has a row per half, so gate on the whole match: a closed
+        # first half with the second not yet started looks exactly like the end.
+        "JOIN (SELECT match_id, MAX(end_time) AS last_end FROM ktp_matches "
+        "GROUP BY match_id HAVING SUM(end_time IS NULL) = 0 "
+        f"AND MAX(end_time) <= {now} - INTERVAL {SETTLE_MINUTES} MINUTE) done "
+        "ON done.match_id = m.match_id "
+        "WHERE m.match_id IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM ktp_flag_state_events f "
+        "WHERE BINARY f.match_id = BINARY m.match_id) "
+        # A report older than the last half's close is partial and gets a new
+        # revision. MySQL stores generated_at's UTC offset converted to the
+        # session zone, which is the zone end_time is written in.
+        "AND NOT EXISTS (SELECT 1 FROM ktp_match_reports r "
+        "WHERE BINARY r.match_id = BINARY m.match_id "
         f"AND r.schema_version = {schema_version} "
-        # end_time IS NULL means the match is still being played. Without this
-        # the 15-minute timer catches a match mid-play, writes a report from
-        # partial data, and `r.id IS NULL` is false forever after -- so it is
-        # never regenerated. Measured: 0 of 124 matches over 09-06..09-09 were
-        # left NULL, so this delays a report by at most one tick, and only for
-        # a match that is genuinely still running.
-        f"WHERE m.match_id IS NOT NULL AND m.end_time IS NOT NULL "
-        f"AND r.id IS NULL {since_clause}{tail}"
+        "AND r.generated_at > done.last_end) "
+        f"{since_clause}{tail}"
     )
 
 

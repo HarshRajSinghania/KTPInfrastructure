@@ -12,7 +12,7 @@ Every check here is written so a broken pipeline makes it exit 1:
   COMPLETE    a generate block must carry its own terminator line;
               a truncated run (crash, OOM, kill) fails instead of passing
   FAILURES    `failures: N` must be present AND zero
-  DRAINED     no match that ended before the run may still be pending;
+  DRAINED     no match that had settled by the run may still be pending;
               a successful generate always writes a row per id it found
   COHERENT    publishable=0 alongside quality_status=PASS is incoherent
   SITE        the empty-state marker must agree with the report count,
@@ -108,11 +108,11 @@ def check_failures(run: GenerateRun | None) -> Finding:
 
 def check_drained(still_pending: list[str]) -> Finding:
     """A generate with failures: 0 writes a row for every id it found, so
-    nothing that ended before the run may still be pending. Matches that
-    concluded after the run are excluded by the caller's ceiling."""
+    nothing that had settled by the run may still be pending. Matches that
+    settled after the run are excluded by the caller's as_of."""
     if still_pending:
         return Finding(False, "DRAINED",
-                       f"{len(still_pending)} match(es) ended before the run "
+                       f"{len(still_pending)} match(es) settled before the run "
                        f"and still have no report: {', '.join(still_pending[:5])}")
     return Finding(True, "DRAINED", "no unreported match predates the run")
 
@@ -183,13 +183,13 @@ def main() -> int:
     db = LocalMysql()
     types = ", ".join(str(t) for t in OFFICIAL_MATCH_TYPES)
     if run is not None and args.log.exists():
-        ceiling = datetime.fromtimestamp(
-            args.log.stat().st_mtime, tz=timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%S")
+        # Server-local like ktp_matches; a UTC stamp is off by the zone offset.
+        ran_at = datetime.fromtimestamp(
+            args.log.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         pending = [r[0] for r in _rows(db.sql(_pending_corpus_sql(
             run.schema_version, args.since, "DISTINCT m.match_id",
-            f"AND m.match_type IN ({types}) "
-            f"AND m.start_time < '{ceiling}' ORDER BY m.match_id")))]
+            f"AND m.match_type IN ({types}) ORDER BY m.match_id",
+            as_of=ran_at)))]
         findings.append(check_drained(pending))
 
     rows = [(r[0], r[1], int(r[2])) for r in _rows(db.sql(

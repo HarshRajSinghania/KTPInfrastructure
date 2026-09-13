@@ -6,16 +6,19 @@ KTP_REPORT_SPECIMENS points at a directory of report-*.json files
 """
 import json
 import os
+import re
+import sqlite3
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from unittest import mock
 
 from scripts import report_service
 from scripts.report_service import (
-    OFFICIAL_MATCH_TYPES, build_aggregates, excluded_by_match_type,
-    explicit_scope_warnings, is_publishable, latest_publishable_reports,
-    pending_match_ids, sql_str)
+    OFFICIAL_MATCH_TYPES, _pending_corpus_sql, build_aggregates,
+    excluded_by_match_type, explicit_scope_warnings, is_publishable,
+    latest_publishable_reports, pending_match_ids, sql_str)
 
 SPECIMENS = os.environ.get("KTP_REPORT_SPECIMENS")
 
@@ -149,6 +152,140 @@ class PendingMatchIdsSince(unittest.TestCase):
                    "not-a-date", "2026/09/13", ""):
             with self.assertRaises(ValueError):
                 pending_match_ids(db, 8, bad)
+
+
+class SqliteDb:
+    """Runs the real discovery SQL on sqlite, so a test asserts which matches
+    are picked instead of how the query is spelled. Only the MySQL-only
+    spellings the builder emits are translated."""
+
+    NOW = "2026-09-13 16:00:00"
+
+    def __init__(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.executescript(
+            "CREATE TABLE ktp_matches (match_id TEXT, half INT, "
+            "match_type INT, start_time TEXT, end_time TEXT);"
+            "CREATE TABLE ktp_flag_state_events (match_id TEXT);"
+            "CREATE TABLE ktp_match_reports (id INTEGER PRIMARY KEY, "
+            "match_id TEXT, schema_version INT, revision INT, "
+            "generated_at TEXT);")
+        self.queries = []
+
+    def half(self, match_id, half, start, end=None, match_type=0):
+        self.conn.execute("INSERT INTO ktp_matches VALUES (?, ?, ?, ?, ?)",
+                          (match_id, half, match_type, at(start), at(end)))
+        self.conn.execute("INSERT INTO ktp_flag_state_events VALUES (?)",
+                          (match_id,))
+
+    def report(self, match_id, generated_at, schema_version=9):
+        self.conn.execute(
+            "INSERT INTO ktp_match_reports (match_id, schema_version, "
+            "revision, generated_at) VALUES (?, ?, 1, ?)",
+            (match_id, schema_version, at(generated_at)))
+
+    def sql(self, query):
+        self.queries.append(query)
+        q = query.replace("BINARY ", "")
+        q = re.sub(
+            r"(NOW\(\)|CAST\('([^']*)' AS DATETIME\)) - INTERVAL (\d+) MINUTE",
+            lambda m: f"datetime('{m.group(2) or self.NOW}', "
+                      f"'-{m.group(3)} minutes')", q)
+        cur = self.conn.execute(q)
+        rows = ["\t".join("NULL" if v is None else str(v) for v in row)
+                for row in cur]
+        header = "\t".join(d[0] for d in cur.description)
+        return "\n".join([header, *rows]) + "\n"
+
+
+def at(clock):
+    """'15:07:13' on the test day; a full timestamp passes through."""
+    if clock is None or len(clock) > 8:
+        return clock
+    return f"2026-09-13 {clock}"
+
+
+class MatchCompletionGate(unittest.TestCase):
+    """ktp_matches holds one row per half, so a closed half is not a finished
+    match, and a report written before the last half closed is partial."""
+
+    SCHEMA = 9
+
+    def pending(self, db):
+        return pending_match_ids(db, self.SCHEMA, "2026-09-13")
+
+    def played(self, db, match_id="m"):
+        db.half(match_id, 1, "14:30:00", "14:50:00")
+        db.half(match_id, 2, "14:53:00", "15:13:00")
+
+    def test_first_half_closed_and_no_second_half_yet_is_not_pending(self):
+        db = SqliteDb()
+        db.half("m", 1, "15:25:00", "15:50:00")
+        self.assertEqual(self.pending(db), [])
+
+    def test_open_second_half_is_not_pending(self):
+        db = SqliteDb()
+        db.half("m", 1, "14:50:00", "15:10:00")
+        db.half("m", 2, "15:13:00")
+        self.assertEqual(self.pending(db), [])
+
+    def test_every_half_closed_and_settled_is_pending(self):
+        db = SqliteDb()
+        self.played(db)
+        self.assertEqual(self.pending(db), ["m"])
+
+    def test_report_written_before_the_last_half_closed_is_regenerated(self):
+        db = SqliteDb()
+        self.played(db)
+        db.report("m", "14:55:00")
+        self.assertEqual(self.pending(db), ["m"])
+
+    def test_report_written_after_the_last_half_closed_is_not_regenerated(self):
+        db = SqliteDb()
+        self.played(db)
+        db.report("m", "15:40:00")
+        self.assertEqual(self.pending(db), [])
+
+    def test_regeneration_happens_once(self):
+        db = SqliteDb()
+        self.played(db)
+        db.report("m", "14:55:00")
+        self.assertEqual(self.pending(db), ["m"])
+        db.report("m", SqliteDb.NOW)
+        self.assertEqual(self.pending(db), [])
+
+    def test_a_report_at_another_schema_version_does_not_count(self):
+        db = SqliteDb()
+        self.played(db)
+        db.report("m", "15:40:00", schema_version=self.SCHEMA - 1)
+        self.assertEqual(self.pending(db), ["m"])
+
+    def test_settle_window_boundary(self):
+        from scripts.report_service import SETTLE_MINUTES
+        now = datetime.fromisoformat(SqliteDb.NOW)
+        edge = now - timedelta(minutes=SETTLE_MINUTES)
+        db = SqliteDb()
+        db.half("settled", 1, "13:00:00", str(edge))
+        db.half("recent", 1, "13:00:00", str(edge + timedelta(minutes=1)))
+        self.assertEqual(self.pending(db), ["settled"])
+
+    def test_settle_window_is_measured_from_as_of_when_given(self):
+        db = SqliteDb()
+        self.played(db)
+        query = _pending_corpus_sql(self.SCHEMA, None, "DISTINCT m.match_id",
+                                    "ORDER BY m.match_id",
+                                    as_of="2026-09-13 15:20:00")
+        self.assertEqual(db.sql(query), "match_id\n")
+        with self.assertRaises(ValueError):
+            _pending_corpus_sql(self.SCHEMA, None, "1", "", as_of="now()")
+
+    def test_exclusion_report_uses_the_same_gate(self):
+        db = SqliteDb()
+        self.played(db, "official")
+        db.half("scrim_done", 1, "14:30:00", "14:50:00", match_type=1)
+        db.half("scrim_break", 1, "15:20:00", "15:50:00", match_type=1)
+        db.half("scrim_open", 1, "15:40:00", match_type=1)
+        self.assertEqual(excluded_by_match_type(db, self.SCHEMA), {"scrim": 1})
 
 
 class OfficialMatchTypeFilter(unittest.TestCase):

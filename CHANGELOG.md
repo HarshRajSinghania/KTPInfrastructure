@@ -4,6 +4,28 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: `report_service generate` reports a match only once every half has closed (2026-09-13)
+
+`ktp_matches` holds one row per half, and discovery tested `end_time` per row,
+so a match qualified as soon as its first half closed. On the first S10 night
+the 15-minute timer wrote four reports during half breaks or second halves:
+three failed quality, and one, written 22 seconds before its second half began,
+passed as a one-half match and was published. A written report was never
+regenerated, because discovery only looked for matches with no report at all.
+
+- Discovery aggregates per match: no half may be open, and the last half must
+  have closed at least `SETTLE_MINUTES` (20) ago. The longest official half
+  break on record was 12.6 minutes; the timer adds at most one tick on top.
+- A match is rediscovered when no report at the current schema was generated
+  after its last half closed, so a partial report gets the next revision.
+  Once that revision exists the match is not picked again.
+- `excluded_by_match_type()` shares the builder and applies the same gate.
+- `verify_report_pipeline`'s DRAINED check measures the settle window from the
+  run, in server-local time. It had compared a UTC ceiling with the local
+  `start_time`.
+- Deploy: pull `/opt/ktp-reports/KTPInfrastructure` forward. The stuck reports
+  regenerate on the next tick after their match settles.
+
 ### `sql`: the official team-score ledger names the HUD observer as its producer (2026-09-13)
 
 `ktp_team_score_observations` holds the engine's team score as relayed by the
