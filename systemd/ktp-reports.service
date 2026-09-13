@@ -45,8 +45,8 @@ IOSchedulingClass=idle
 # Deliberately only NoNewPrivileges. ProtectSystem=strict was tried and
 # removed: it makes the checkout read-only, so Python cannot write __pycache__
 # and the unit fails on a detail unrelated to what it does. The account is
-# already nologin with SELECT everywhere and INSERT/UPDATE on exactly the two
-# tables it owns, which is where the real containment is.
+# already nologin with SELECT on only the tables it reads and INSERT on the two
+# it owns, which is where the real containment is.
 NoNewPrivileges=true
 
 # scripts/verify_report_pipeline.py defaults to --log /var/log/ktp-report-service.log

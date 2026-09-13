@@ -1075,6 +1075,16 @@ def main() -> int:
     ap.add_argument("--map", default="dod_anzio")
     ap.add_argument("--per-team", type=int, choices=(6,), default=6,
                     help="Lane B is fixed at tournament-sized 6v6")
+    ap.add_argument("--shot-detail-types", type=int, default=-1,
+                    help="ktp_shot_detail_types bitmask for KTPMatchHandler, as "
+                         "(1 << MatchType). -1 (default) leaves the plugin's own "
+                         "default alone (4 = 12-mans only). Set before the match "
+                         "starts, because the plugin applies it once at match live.")
+    ap.add_argument("--shot-detail", type=int, default=-1,
+                    help="ktp_stats_shot_detail for this run. 0 (default) "
+                         "leaves the diagnostic fields NULL; 1 populates them. "
+                         "The plugin default is 0 -- production opts a match "
+                         "type in deliberately, so the lane must too.")
     ap.add_argument("--play-seconds", type=int, default=360,
                     help="full-match play window; v6 schema22/2s ratings require at least "
                          "the profile minimum (currently 300 seconds)")
@@ -1375,13 +1385,28 @@ def main() -> int:
                         print("  " + preflight["detail"], flush=True)
 
                     if mh_amxx is not None:
+                        def _shot_detail_then_preflight():
+                            # -1 means DO NOT TOUCH the cvar. Anything else
+                            # overrides whatever KTPMatchHandler decided from
+                            # the match type: the plugin applies its gate ~1.5s
+                            # after the round restart and this hook runs later,
+                            # so an unconditional rcon here silently wins and
+                            # makes a gate test measure the harness instead.
+                            if args.shot_detail >= 0:
+                                handle.rcon(
+                                    f'ktp_stats_shot_detail {int(args.shot_detail)}')
+                            _strict_live_preflight()
+
+                        if args.shot_detail_types >= 0:
+                            handle.rcon(
+                                f'ktp_shot_detail_types {int(args.shot_detail_types)}')
                         report["match"] = run_match(
                             MatchDriver(handle), half=1,
                             play_seconds=args.play_seconds, log_path=args.log,
                             per_team=args.per_team, before_play=_stage_kill_switch,
                             during_play=_stage_clean_scenarios,
                             after_match=_stage_post_match_frag,
-                            after_live=_strict_live_preflight)
+                            after_live=_shot_detail_then_preflight)
                         # Freeze kill-switch recovery evidence before the
                         # intentionally separate diagnostic match.  A later
                         # diagnostic assist must not make a clean match with no
@@ -1554,8 +1579,17 @@ def main() -> int:
             if report.get("match") else 0
         )
         shot_total = log_text.count('triggered "shot"')
+        # Scoped by matchid rather than by log position, because that is how the
+        # daemon attributes these rows. KTPMatchHandler sets the match context
+        # 1.5s after the round restart and logs KTP_MATCH_START at 2.0s -- a
+        # deliberate 0.5s gap so the context is live before the daemon sees the
+        # start marker. Shots captured in that gap are correctly tagged, correctly
+        # stored, and invisible to position scoping, which reads as duplication:
+        # a bot match put 4 shots there and reported 335 rows against 331 markers.
         shot_match_emitted = (
-            log_invariants.count_in_match(report_match_log, 'triggered "shot"')
+            log_invariants.count_for_match_id(
+                report_match_log, 'triggered "shot"',
+                (report.get("match") or {}).get("match_id", ""))
             if report.get("match") else 0
         )
         life_match_emitted = (

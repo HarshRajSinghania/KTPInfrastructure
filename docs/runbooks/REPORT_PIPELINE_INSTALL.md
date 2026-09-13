@@ -12,8 +12,8 @@ Everything below needs root. It is a one-time setup.
 ## 1. Service account
 
 Not `krodssh`. That is an interactive login for analysis and has never run
-automation. The pipeline gets its own identity with the same reads, plus write
-on exactly the two tables it owns.
+automation. The pipeline gets its own identity: SELECT on the tables it reads,
+and INSERT on the two it owns.
 
 Confirm the auth plugin first, because the `CREATE USER` below depends on it:
 
@@ -33,21 +33,98 @@ The Linux user and the MySQL user must have the same name. `auth_socket`
 authenticates by peer credential, so a mismatch fails at connect time with a
 confusing access-denied rather than anything that names the cause.
 
-Mirror the reads rather than hand-copying 227 grants:
+Grant the tables the pipeline names, and nothing else. Don't copy `krodssh`'s
+grants: they also cover `hlstatsx_lan` and `ktp_lan`, which the pipeline never
+reads, and `SHOW GRANTS` prints lines with no trailing `;`, so piping them back
+into `mysql` fails at line 2.
+
+The list was derived on 2026-09-13 from `f498463`. It is every table named in
+the import closure of `scripts/report_service.py` and `scripts/report_sync.py`,
+plus the `sql/analytics/*.sql` files `match_analytics` loads from disk. A grep of
+the Python alone misses most of the `hlstats_Events_*` tables. The pipeline only
+appends — a new report or aggregate is a new revision row — so there is no
+UPDATE or DELETE.
 
 ```bash
-sudo mysql -N -B -e "SHOW GRANTS FOR 'krodssh'@'localhost'" \
-  | sed "s/krodssh/ktpreports/g" > /tmp/mirror_grants.sql
-# read it before applying it
-sudo mysql < /tmp/mirror_grants.sql
+sudo mysql <<'SQL'
+GRANT SELECT ON hlstatsx.hlstats_Actions                    TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_Frags               TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_PlayerActions       TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_PlayerPlayerActions TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_Statsme             TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_Statsme2            TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_Suicides            TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.hlstats_Events_Teamkills           TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_assist_events                  TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_capture_health                 TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_capture_manifests              TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_damage_events                  TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_flag_captures                  TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_flag_positions                 TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_flag_state_events              TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_grenade_entity_events          TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_life_events                    TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_match_players                  TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_match_stats                    TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_matches                        TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_objective_attempt_events       TO 'ktpreports'@'localhost';
+GRANT SELECT ON hlstatsx.ktp_position_samples               TO 'ktpreports'@'localhost';
+GRANT SELECT, INSERT ON hlstatsx.ktp_match_reports          TO 'ktpreports'@'localhost';
+GRANT SELECT, INSERT ON hlstatsx.ktp_web_season_aggregates  TO 'ktpreports'@'localhost';
+SQL
 ```
 
-Then the two tables it writes:
+When the code starts reading a new table, add it here and grant it. Nothing
+else will tell you, which is the point of the next check.
+
+### Check what the account can see
+
+`source_capabilities()` decides which optional sources to use by asking
+`information_schema` whether each table exists, and MySQL hides tables the
+account holds no privilege on. A missing grant therefore looks like a missing
+table: that source is skipped, the report comes out WARN, and it still
+publishes. No error anywhere.
+
+Check as the account, not as root:
 
 ```bash
-sudo mysql -e "GRANT INSERT, UPDATE ON hlstatsx.ktp_match_reports TO 'ktpreports'@'localhost';
-GRANT INSERT, UPDATE ON hlstatsx.ktp_web_season_aggregates TO 'ktpreports'@'localhost';"
+sudo -u ktpreports mysql --user=ktpreports hlstatsx -N -e \
+  "SELECT CURRENT_USER(), COUNT(*) FROM information_schema.tables WHERE table_schema='hlstatsx'"
 ```
+
+Expect `ktpreports@localhost` and one table per line of the grant block (24 at
+`f498463`). Pass `--user` every time: without it `sudo -u` sends `root` and gets
+`ERROR 1698`, and the account has no home, so there is no `.my.cnf` to fall back
+on. If `CURRENT_USER()` names anyone else, you measured the wrong account.
+
+### Smoke-test the writes without leaving a row
+
+The account cannot DELETE, so an insert-then-delete smoke test fails halfway
+and strands a permanent `smoke-test` row in an append-only table. Both tables
+are InnoDB, so roll it back instead:
+
+```sql
+-- sudo -u ktpreports mysql --user=ktpreports hlstatsx
+SELECT COUNT(*) FROM ktp_match_reports;
+START TRANSACTION;
+INSERT INTO ktp_match_reports
+  (match_id, schema_version, revision, generated_at, quality_status, publishable, report_sha256, report)
+  VALUES ('smoke-test', 0, 1, NOW(), 'SMOKE', 0, REPEAT('0', 64), '{}');
+SELECT ROW_COUNT();   -- 1
+ROLLBACK;
+SELECT COUNT(*) FROM ktp_match_reports;   -- same as before
+
+SELECT COUNT(*) FROM ktp_web_season_aggregates;
+START TRANSACTION;
+INSERT INTO ktp_web_season_aggregates
+  (kind, revision, generated_at, source_report_count, report_schema_version, payload_sha256, payload)
+  VALUES ('smoke-test', 1, NOW(), 0, 0, REPEAT('0', 64), '{}');
+SELECT ROW_COUNT();   -- 1
+ROLLBACK;
+SELECT COUNT(*) FROM ktp_web_season_aggregates;   -- same as before
+```
+
+If either count moved, a row was committed: stop and have root remove it.
 
 ## 2. Deployment checkout
 
