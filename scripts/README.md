@@ -15,7 +15,7 @@ Operational scripts for KTP game servers and data server.
 `--source-server-root SOURCE_SERVER=ROOT`, binds the pair to its configured
 source path and closed analytics context, and imports
 only exact `engine-team-score-v1` rows into the append-only migration-023
-ledgers. `project_team_score.py` runs the strict
+ledgers, labelling each one with `producer = KTPHudObserver` (migration 032). `project_team_score.py` runs the strict
 post-match boundary, ordering, side-map, carryover, and conflict checks before
 writing a canonical neutral-team DTO and immutable release digest.
 

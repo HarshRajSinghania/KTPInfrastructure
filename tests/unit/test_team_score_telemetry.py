@@ -624,6 +624,10 @@ class _RecordingMysql:
     def apply_migration(self, path):
         _RecordingMysql.built[-1]["migrated"] = True
 
+    def apply_migrations(self, paths):
+        _RecordingMysql.built[-1]["migrated"] = True
+        _RecordingMysql.built[-1]["migrations"] = list(paths)
+
     def import_observations(self, parsed):
         return import_team_score_events._validated_only(parsed)
 
@@ -669,3 +673,141 @@ def test_projector_release_files_are_immutable_and_idempotent(tmp_path):
     with pytest.raises(ValueError, match="immutable release path"):
         project_team_score._write_immutable(path, b"correction")
     assert path.read_bytes() == b"first"
+
+
+def _top_level_items(text: str) -> list[str]:
+    items, depth, current = [], 0, []
+    for ch in text:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            items.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    items.append("".join(current).strip())
+    return items
+
+
+def _parenthesised(sql: str, open_at: int) -> str:
+    depth = 0
+    for index in range(open_at, len(sql)):
+        depth += {"(": 1, ")": -1}.get(sql[index], 0)
+        if depth == 0:
+            return sql[open_at + 1:index]
+    raise AssertionError("unbalanced parentheses")
+
+
+def _first_values_tuple(sql: str, marker: str) -> list[str]:
+    start = sql.index("VALUES", sql.index(marker))
+    return _top_level_items(_parenthesised(sql, sql.index("(", start)))
+
+
+def _insert_select(sql: str, table: str) -> tuple[list[str], list[str]]:
+    start = sql.index(f"INSERT INTO `{table}`\n")
+    body = sql[start:sql.index(";", start)]
+    columns = _top_level_items(_parenthesised(body, body.index("(")))
+    selected = body[body.index("SELECT") + len("SELECT"):body.index("FROM")]
+    return columns, _top_level_items(selected)
+
+
+def test_import_sql_writes_the_hud_observer_as_producer_of_both_ledgers(tmp_path):
+    path = write_observer(tmp_path, [
+        official_event(),
+        official_event(tick=20.5, event_sequence=2, allies_score=1, sample_kind="final"),
+    ])
+    parsed = score.read_event_files(
+        [path], source_server_roots={SOURCE_SERVER: path.parent.parent},
+    )
+    sql = score.build_import_sql(parsed)
+    producer = f"CONVERT(0x{b'KTPHudObserver'.hex()} USING utf8mb4)"
+    assert score.PRODUCER == "KTPHudObserver"
+
+    stage_insert = sql.index("INSERT INTO `ktp_team_score_import_stage` (")
+    stage_columns = _top_level_items(_parenthesised(sql, sql.index("(", stage_insert)))
+    row_values = _first_values_tuple(sql, "INSERT INTO `ktp_team_score_import_stage`")
+    assert len(row_values) == len(stage_columns)
+    assert row_values[stage_columns.index("producer")] == producer
+
+    create = sql.index("CREATE TEMPORARY TABLE `ktp_team_score_manifest_stage`")
+    manifest_columns = [item.split("`")[1] for item in
+                        _top_level_items(_parenthesised(sql, sql.index("(", create)))]
+    manifest_values = _first_values_tuple(sql, "INSERT INTO `ktp_team_score_manifest_stage`")
+    assert len(manifest_values) == len(manifest_columns)
+    assert manifest_values[manifest_columns.index("producer")] == producer
+
+    for table in ("ktp_team_score_observations", "ktp_team_score_ingest_manifests"):
+        columns, selected = _insert_select(sql, table)
+        assert len(columns) == len(selected)
+        assert selected[columns.index("producer")] == "s.producer"
+
+    assert sql.count(producer) == len(score._stage_rows(parsed.observations)) + len(parsed.manifests)
+
+
+def test_migrate_applies_023_then_the_producer_migration(tmp_path, monkeypatch):
+    rc, built = _import_main(tmp_path, monkeypatch,
+                             "--migrate", "--database", "hlstatsx_lan")
+    assert rc == 0
+    assert built[0]["migrations"] == [score.MIGRATION, score.PRODUCER_MIGRATION]
+    assert score.MIGRATIONS == (score.MIGRATION, score.PRODUCER_MIGRATION)
+    assert all(path.is_file() for path in score.MIGRATIONS)
+
+
+def test_explicit_migration_paths_replace_the_defaults_in_order(tmp_path, monkeypatch):
+    first, second = tmp_path / "a.sql", tmp_path / "b.sql"
+    rc, built = _import_main(tmp_path, monkeypatch, "--migrate", "--database", "x",
+                             "--migration", str(first), "--migration", str(second))
+    assert rc == 0
+    assert built[0]["migrations"] == [first, second]
+
+
+def _semicolons_in_comments_or_strings(sql: str) -> list[str]:
+    found, index, quote, start = [], 0, None, 0
+    while index < len(sql):
+        ch = sql[index]
+        if quote is None:
+            if sql.startswith("--", index) or ch == "#":
+                end = sql.find("\n", index)
+                end = len(sql) if end < 0 else end
+                if ";" in sql[index:end]:
+                    found.append(sql[index:end])
+                index = end
+                continue
+            if sql.startswith("/*", index):
+                end = sql.index("*/", index) + 2
+                if ";" in sql[index:end]:
+                    found.append(sql[index:end])
+                index = end
+                continue
+            if ch in "'\"`":
+                quote, start = ch, index
+        elif ch == quote:
+            if sql[index + 1:index + 2] == quote:
+                index += 2
+                continue
+            if ";" in sql[start:index]:
+                found.append(sql[start:index + 1])
+            quote = None
+        index += 1
+    assert quote is None, "unterminated quote"
+    return found
+
+
+def test_producer_migration_has_no_semicolon_inside_a_comment_or_string():
+    # The mysql client splits on ';' even inside a comment, which half-applies a file.
+    text = score.PRODUCER_MIGRATION.read_text(encoding="utf-8")
+    assert _semicolons_in_comments_or_strings(text) == []
+
+
+def test_semicolon_scanner_catches_both_placements():
+    assert len(_semicolons_in_comments_or_strings("-- a; b\nSELECT 'x;y';\n")) == 2
+    assert _semicolons_in_comments_or_strings("SELECT 'it''s';\n-- fine\n") == []
+
+
+def test_producer_migration_declares_its_engine_and_pins_the_producer():
+    text = score.PRODUCER_MIGRATION.read_text(encoding="utf-8")
+    assert text.splitlines()[0] == "-- ENGINE: mysql (hlstatsx on the data server)"
+    assert text.count(f"CHECK (producer = ''{score.PRODUCER}'')") == 2
+

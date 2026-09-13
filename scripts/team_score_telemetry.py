@@ -27,6 +27,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 OFFICIAL_SOURCE = "engine-team-score-v1"
 SOURCE_VERSION = 1
+# The ledger holds the engine score as relayed by the HUD observer, never the captain-reported league score.
+PRODUCER = "KTPHudObserver"
 SETTLEMENT_SECONDS = 30
 LEDGER_LOCK = "ktp_team_score_ledger_v1"
 SUPPORTED_MATCH_TYPES = frozenset(range(6))
@@ -35,6 +37,8 @@ MAX_JSONL_BYTES = 1 << 30
 MAX_OFFICIAL_ROWS = 100_000
 MAX_RAW_ROW_BYTES = 64 * 1024
 MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "migrate_023_team_score_observations.sql"
+PRODUCER_MIGRATION = MIGRATION.with_name("migrate_032_team_score_producer.sql")
+MIGRATIONS = (MIGRATION, PRODUCER_MIGRATION)
 
 _DATABASE = re.compile(r"^[A-Za-z0-9_]+$")
 _REQUIRED_KEYS = frozenset({
@@ -674,7 +678,7 @@ def build_import_sql(parsed: ParsedImport) -> str:
             _sql_decimal(row.tick_seconds), str(row.event_sequence), observed,
             str(row.allies_score), str(row.axis_score),
             str(row.allies_team_id), str(row.axis_team_id),
-            _sql_text(row.source), str(row.source_version),
+            _sql_text(row.source), str(row.source_version), _sql_text(PRODUCER),
             _sql_text(row.observation_kind), _sql_text(row.retention_class),
             _sql_binary(row.manifest_content_sha256),
             _sql_text(row.raw_event_json), _sql_binary(row.raw_event_sha256),
@@ -690,7 +694,7 @@ def build_import_sql(parsed: ParsedImport) -> str:
     )
     row_columns = (
         "match_id,match_type,half,map_name,source_server,tick_seconds,event_sequence,observed_at,"
-        "allies_score,axis_score,allies_team_id,axis_team_id,source,source_version,"
+        "allies_score,axis_score,allies_team_id,axis_team_id,source,source_version,producer,"
         "observation_kind,retention_class,manifest_content_sha256,raw_event_json,raw_event_sha256,"
         "source_file_sha256,source_path_sha256,source_line_number,input_count,"
         "batch_incumbent_raw_sha256,batch_incumbent_raw_event_json,batch_variant_count"
@@ -701,7 +705,7 @@ def build_import_sql(parsed: ParsedImport) -> str:
         end_axis = "NULL" if item.match_end_axis_score is None else str(item.match_end_axis_score)
         manifest_values.append("(" + ",".join((
             _sql_text(item.match_id), _sql_text(item.map_name), str(item.match_type),
-            _sql_text(item.source_server), f"'{item.observer_started_at}'",
+            _sql_text(item.source_server), _sql_text(PRODUCER), f"'{item.observer_started_at}'",
             f"'{item.observer_ended_at}'", str(item.terminal_half),
             str(item.event_count), str(item.official_row_count), str(item.retained_row_count), "1",
             str(item.settlement_seconds), _sql_binary(item.events_file_sha256),
@@ -720,6 +724,7 @@ CREATE TEMPORARY TABLE `ktp_team_score_manifest_stage` (
   `map_name` VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   `match_type` TINYINT UNSIGNED NOT NULL,
   `source_server` VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `producer` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `observer_started_at` DATETIME(3) NOT NULL,
   `observer_ended_at` DATETIME(3) NOT NULL,
   `terminal_half` SMALLINT UNSIGNED NOT NULL,
@@ -754,6 +759,7 @@ CREATE TEMPORARY TABLE `ktp_team_score_import_stage` (
   `axis_team_id` TINYINT UNSIGNED NOT NULL,
   `source` VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `source_version` SMALLINT UNSIGNED NOT NULL,
+  `producer` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `observation_kind` VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `retention_class` VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `manifest_content_sha256` BINARY(32) NOT NULL,
@@ -845,11 +851,11 @@ SET @ktp_team_score_blocked := (
 );
 
 INSERT INTO `ktp_team_score_ingest_manifests`
- (match_id,map_name,match_type,source_server,observer_started_at,observer_ended_at,
+ (match_id,map_name,match_type,source_server,producer,observer_started_at,observer_ended_at,
   terminal_half,event_count,official_row_count,retained_row_count,lifecycle_complete,settlement_seconds,
   events_file_sha256,metadata_file_sha256,events_path_sha256,metadata_path_sha256,
   manifest_content_sha256,match_end_allies_score,match_end_axis_score,retention_class)
-SELECT s.match_id,s.map_name,s.match_type,s.source_server,s.observer_started_at,s.observer_ended_at,
+SELECT s.match_id,s.map_name,s.match_type,s.source_server,s.producer,s.observer_started_at,s.observer_ended_at,
  s.terminal_half,s.event_count,s.official_row_count,s.retained_row_count,s.lifecycle_complete,s.settlement_seconds,
  s.events_file_sha256,s.metadata_file_sha256,s.events_path_sha256,s.metadata_path_sha256,
  s.manifest_content_sha256,s.match_end_allies_score,s.match_end_axis_score,s.retention_class
@@ -928,12 +934,12 @@ SET @ktp_team_score_duplicates := (
 
 INSERT INTO `ktp_team_score_observations`
   (match_id,map_name,match_type,half,tick_seconds,event_sequence,observed_at,
-   allies_score,axis_score,allies_team_id,axis_team_id,source,source_version,
+   allies_score,axis_score,allies_team_id,axis_team_id,source,source_version,producer,
    source_server,observation_kind,retention_class,manifest_content_sha256,
    raw_event_json,raw_event_sha256,
    source_file_sha256,source_path_sha256,source_line_number)
 SELECT s.match_id,s.map_name,s.match_type,s.half,s.tick_seconds,s.event_sequence,s.observed_at,
-       s.allies_score,s.axis_score,s.allies_team_id,s.axis_team_id,s.source,s.source_version,
+       s.allies_score,s.axis_score,s.allies_team_id,s.axis_team_id,s.source,s.source_version,s.producer,
        s.source_server,s.observation_kind,s.retention_class,s.manifest_content_sha256,
        s.raw_event_json,s.raw_event_sha256,
        s.source_file_sha256,s.source_path_sha256,s.source_line_number
@@ -1020,6 +1026,10 @@ class MysqlCli:
         if not migration.is_file():
             raise FileNotFoundError(migration)
         self.execute(migration.read_text(encoding="utf-8"))
+
+    def apply_migrations(self, paths: Sequence[Path] = MIGRATIONS) -> None:
+        for path in paths:
+            self.apply_migration(path)
 
     def import_observations(self, parsed: ParsedImport) -> ImportResult:
         rows = parsed.observations

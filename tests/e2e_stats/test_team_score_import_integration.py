@@ -7,12 +7,20 @@ from pathlib import Path
 import pytest
 
 from scripts import team_score_telemetry as score
+from scripts import import_team_score_events
 from scripts import project_team_score
 from scripts.lane_b_e2e import import_lane_b_score_fixture
 from tests.e2e_stats.ephemeral_mysql import EphemeralMysql, MysqlUnavailable
 
 
 SOURCE_SERVER = "lane-b-score-fixture"
+OBSERVATIONS = "ktp_team_score_observations"
+MANIFESTS = "ktp_team_score_ingest_manifests"
+
+
+def load_ledger(db: EphemeralMysql) -> None:
+    for migration in score.MIGRATIONS:
+        db.load_file(migration)
 
 
 def event(*, half=1, tick=0.25, sequence=1, allies=0, axis=0,
@@ -97,8 +105,8 @@ def rows():
 
 def test_migration_import_idempotency_conflict_and_projection_against_mariadb(tmp_path):
     with EphemeralMysql.start(parent=tmp_path) as db:
-        db.load_file(score.MIGRATION)
-        db.load_file(score.MIGRATION)
+        load_ledger(db)
+        load_ledger(db)
         prepare_match(db, "db-match")
         mysql = score.MysqlCli(
             mysql_bin=db.client, database=db.database,
@@ -144,7 +152,7 @@ def test_migration_import_idempotency_conflict_and_projection_against_mariadb(tm
 
 def test_same_batch_conflict_is_audited_and_no_arbitrary_incumbent_is_inserted(tmp_path):
     with EphemeralMysql.start(parent=tmp_path) as db:
-        db.load_file(score.MIGRATION)
+        load_ledger(db)
         prepare_match(db, "batch-conflict", terminal_half=1)
         mysql = score.MysqlCli(
             mysql_bin=db.client, database=db.database,
@@ -231,7 +239,7 @@ def test_migration_rejects_default_foreign_key_or_check_drift(tmp_path, mutation
 
 def test_modified_settled_file_is_rejected_and_durably_audited(tmp_path):
     with EphemeralMysql.start(parent=tmp_path) as db:
-        db.load_file(score.MIGRATION)
+        load_ledger(db)
         prepare_match(db, "tamper-TEST", terminal_half=1)
         mysql = score.MysqlCli(
             mysql_bin=db.client, database=db.database,
@@ -292,7 +300,7 @@ def _ot_rows(match_id):
 
 def test_importer_requires_exact_regulation_and_ot_half_set(tmp_path):
     with EphemeralMysql.start(parent=tmp_path) as db:
-        db.load_file(score.MIGRATION)
+        load_ledger(db)
         mysql = score.MysqlCli(
             mysql_bin=db.client, database=db.database,
             socket=db.socket_path, user="root",
@@ -317,7 +325,7 @@ def test_importer_requires_exact_regulation_and_ot_half_set(tmp_path):
 @pytest.mark.parametrize("half_ids", [[2], [1, 3], [1, 100]])
 def test_importer_rejects_missing_or_unexpected_database_halves(tmp_path, half_ids):
     with EphemeralMysql.start(parent=tmp_path) as db:
-        db.load_file(score.MIGRATION)
+        load_ledger(db)
         match_id = "bad-halves-" + "-".join(map(str, half_ids))
         terminal = 2 if half_ids == [2] else 1
         prepare_match(db, match_id, terminal_half=terminal, match_type=0,
@@ -339,7 +347,7 @@ def test_importer_rejects_missing_or_unexpected_database_halves(tmp_path, half_i
 
 def test_actual_lane_b_fixture_import_projection_path_is_available(tmp_path):
     with EphemeralMysql.start(parent=tmp_path) as db:
-        db.load_file(score.MIGRATION)
+        load_ledger(db)
         prepare_match(db, "lane-b-score-TEST", terminal_half=1)
         template = (
             Path(__file__).parent / "fixtures" / "team_score"
@@ -355,3 +363,178 @@ def test_actual_lane_b_fixture_import_projection_path_is_available(tmp_path):
             "baseline", "change", "final",
         ]
         assert timeline["halves"][0]["points"][-1]["team1Score"] == 1
+
+
+OBSERVATION_COPY_COLUMNS = (
+    "match_id,map_name,match_type,half,tick_seconds,event_sequence,observed_at,"
+    "allies_score,axis_score,allies_team_id,axis_team_id,source_server,source,"
+    "source_version,observation_kind,retention_class,manifest_content_sha256,"
+    "raw_event_json,raw_event_sha256,source_file_sha256,source_path_sha256,source_line_number"
+)
+
+
+def assert_producer_contract(db: EphemeralMysql) -> None:
+    assert db.count(f"""
+SELECT COUNT(*) FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA=DATABASE() AND COLUMN_NAME='producer'
+AND TABLE_NAME IN ('{OBSERVATIONS}','{MANIFESTS}')
+AND COLUMN_TYPE='varchar(32)' AND COLLATION_NAME='ascii_bin'
+AND IS_NULLABLE='NO' AND COLUMN_DEFAULT IS NULL""") == 2
+    for table, anchor in ((OBSERVATIONS, "source_version"), (MANIFESTS, "source_server")):
+        assert db.count(f"""
+SELECT p.ORDINAL_POSITION-a.ORDINAL_POSITION FROM information_schema.COLUMNS p
+JOIN information_schema.COLUMNS a ON a.TABLE_SCHEMA=p.TABLE_SCHEMA AND a.TABLE_NAME=p.TABLE_NAME
+WHERE p.TABLE_SCHEMA=DATABASE() AND p.TABLE_NAME='{table}'
+AND p.COLUMN_NAME='producer' AND a.COLUMN_NAME='{anchor}'""") == 1
+        comment = db.scalar(f"SELECT TABLE_COMMENT FROM information_schema.TABLES "
+                            f"WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='{table}'")
+        assert "KTPHudObserver" in comment
+        assert "not the captain-reported league score" in comment
+    assert db.count("""
+SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_TYPE='CHECK' AND (
+ (TABLE_NAME='ktp_team_score_observations' AND CONSTRAINT_NAME='chk_team_score_producer') OR
+ (TABLE_NAME='ktp_team_score_ingest_manifests' AND CONSTRAINT_NAME='chk_team_score_manifest_producer'))""") == 2
+
+
+def test_importer_migrate_on_a_fresh_database_writes_the_producer(tmp_path):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        prepare_match(db, "db-match")
+        path = write_events(tmp_path, rows())
+        rc = import_team_score_events.main([
+            "--source-server-root", f"{SOURCE_SERVER}={path.parent.parent}",
+            "--migrate", "--database", db.database, "--mysql-bin", db.client,
+            "--socket", str(db.socket_path), "--user", "root", str(path),
+        ])
+        assert rc == 0
+        assert_producer_contract(db)
+        assert db.count(f"SELECT COUNT(*) FROM {OBSERVATIONS} WHERE BINARY producer='KTPHudObserver'") == 5
+        assert db.count(f"SELECT COUNT(*) FROM {OBSERVATIONS}") == 5
+        assert db.count(f"SELECT COUNT(*) FROM {MANIFESTS} WHERE BINARY producer='KTPHudObserver'") == 1
+        # Both migrations stay no-ops over a populated post-032 schema.
+        load_ledger(db)
+        db.load_file(score.MIGRATION)
+        assert_producer_contract(db)
+
+
+def test_production_order_023_then_032_with_reruns_in_every_order(tmp_path):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        db.load_file(score.MIGRATION)
+        db.load_file(score.MIGRATION)
+        assert db.count("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE "
+                        "TABLE_SCHEMA=DATABASE() AND COLUMN_NAME='producer'") == 0
+        db.load_file(score.PRODUCER_MIGRATION)
+        db.load_file(score.PRODUCER_MIGRATION)
+        db.load_file(score.MIGRATION)
+        assert_producer_contract(db)
+        prepare_match(db, "db-match")
+        path = write_events(tmp_path, rows())
+        mysql = score.MysqlCli(mysql_bin=db.client, database=db.database,
+                               socket=db.socket_path, user="root")
+        parsed = score.read_event_files(
+            [path], source_server_roots={SOURCE_SERVER: path.parent.parent},
+        )
+        assert mysql.import_observations(parsed).inserted == 5
+
+
+def test_producer_migration_backfills_rows_that_already_exist(tmp_path):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        db.load_file(score.MIGRATION)
+        db.sql(f"""
+INSERT INTO {MANIFESTS} (match_id,map_name,match_type,source_server,observer_started_at,
+ observer_ended_at,terminal_half,event_count,official_row_count,retained_row_count,
+ lifecycle_complete,settlement_seconds,events_file_sha256,metadata_file_sha256,
+ events_path_sha256,metadata_path_sha256,manifest_content_sha256,retention_class)
+VALUES ('old-match','dod_anzio',0,'srv','2026-01-01','2026-01-01',1,1,1,1,1,30,
+ UNHEX(SHA2('a',256)),UNHEX(SHA2('b',256)),UNHEX(SHA2('c',256)),UNHEX(SHA2('d',256)),
+ UNHEX(SHA2('e',256)),'retained')""")
+        db.sql(f"""
+INSERT INTO {OBSERVATIONS} ({OBSERVATION_COPY_COLUMNS})
+VALUES ('old-match','dod_anzio',0,1,1.5,1,NULL,0,0,1,2,'srv','engine-team-score-v1',1,
+ 'baseline','retained',UNHEX(SHA2('e',256)),'{{}}',UNHEX(SHA2('f',256)),
+ UNHEX(SHA2('g',256)),UNHEX(SHA2('h',256)),1)""")
+        db.load_file(score.PRODUCER_MIGRATION)
+        assert db.scalar(f"SELECT producer FROM {OBSERVATIONS}") == "KTPHudObserver"
+        assert db.scalar(f"SELECT producer FROM {MANIFESTS}") == "KTPHudObserver"
+        assert_producer_contract(db)
+
+
+def test_check_rejects_a_wrong_or_missing_producer(tmp_path):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        load_ledger(db)
+        prepare_match(db, "db-match")
+        path = write_events(tmp_path, rows())
+        mysql = score.MysqlCli(mysql_bin=db.client, database=db.database,
+                               socket=db.socket_path, user="root")
+        mysql.import_observations(score.read_event_files(
+            [path], source_server_roots={SOURCE_SERVER: path.parent.parent},
+        ))
+        copied = OBSERVATION_COPY_COLUMNS.replace("event_sequence", "event_sequence+1000")
+
+        def copy_row(producer_value):
+            return (f"INSERT INTO {OBSERVATIONS} ({OBSERVATION_COPY_COLUMNS},producer) "
+                    f"SELECT {copied},{producer_value} FROM {OBSERVATIONS} ORDER BY id LIMIT 1")
+
+        with pytest.raises(MysqlUnavailable, match="chk_team_score_producer"):
+            db.sql(copy_row("'kTPHudObserver'"))
+        with pytest.raises(MysqlUnavailable, match="chk_team_score_producer"):
+            db.sql(copy_row("'KTP-ReHLDS'"))
+        with pytest.raises(MysqlUnavailable, match="producer"):
+            db.sql(f"INSERT INTO {OBSERVATIONS} ({OBSERVATION_COPY_COLUMNS}) "
+                   f"SELECT {copied} FROM {OBSERVATIONS} ORDER BY id LIMIT 1")
+        with pytest.raises(MysqlUnavailable, match="chk_team_score_manifest_producer"):
+            db.sql(f"UPDATE {MANIFESTS} SET producer='captain-report'")
+        db.sql(copy_row("'KTPHudObserver'"))
+        assert db.count(f"SELECT COUNT(*) FROM {OBSERVATIONS}") == 6
+
+
+@pytest.mark.parametrize("shape", ["no-023", "extra-column", "wrong-producer-type"])
+def test_producer_migration_refuses_a_shape_it_does_not_recognise(tmp_path, shape):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        if shape != "no-023":
+            db.load_file(score.MIGRATION)
+        if shape == "extra-column":
+            db.sql(f"ALTER TABLE {OBSERVATIONS} ADD COLUMN surprise INT NULL")
+        elif shape == "wrong-producer-type":
+            db.sql(f"ALTER TABLE {MANIFESTS} ADD COLUMN producer "
+                   "VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL")
+        with pytest.raises(MysqlUnavailable, match="ERROR_032_team_score_producer_needs"):
+            db.load_file(score.PRODUCER_MIGRATION)
+        assert db.count("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+                        "WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME LIKE '%producer'") == 0
+
+
+@pytest.mark.parametrize("drift,error", [
+    ("type", "ERROR_023_team_score_observation"),
+    ("default", "ERROR_023_team_score_observation"),
+    ("dropped-check", "ERROR_023_team_score_constraint"),
+    ("loosened-check", "ERROR_023_team_score_constraint"),
+])
+def test_migration_023_rejects_producer_drift_after_032(tmp_path, drift, error):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        load_ledger(db)
+        if drift == "type":
+            db.sql(f"ALTER TABLE {OBSERVATIONS} MODIFY producer "
+                   "VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL")
+        elif drift == "default":
+            db.sql(f"ALTER TABLE {OBSERVATIONS} ALTER COLUMN producer SET DEFAULT 'KTPHudObserver'")
+        else:
+            db.sql(f"ALTER TABLE {OBSERVATIONS} DROP CHECK chk_team_score_producer")
+            if drift == "loosened-check":
+                db.sql(f"ALTER TABLE {OBSERVATIONS} ADD CONSTRAINT chk_team_score_producer "
+                       "CHECK (producer IN ('KTPHudObserver','other'))")
+        with pytest.raises(MysqlUnavailable, match=error):
+            db.load_file(score.MIGRATION)
+
+
+def test_producer_migration_finishes_a_partial_run(tmp_path):
+    with EphemeralMysql.start(parent=tmp_path) as db:
+        db.load_file(score.MIGRATION)
+        db.sql(f"ALTER TABLE {OBSERVATIONS} ADD COLUMN producer VARCHAR(32) CHARACTER SET ascii "
+               "COLLATE ascii_bin NOT NULL DEFAULT 'KTPHudObserver' AFTER source_version")
+        with pytest.raises(MysqlUnavailable, match="ERROR_023_team_score_"):
+            db.load_file(score.MIGRATION)
+        db.load_file(score.PRODUCER_MIGRATION)
+        db.load_file(score.MIGRATION)
+        assert_producer_contract(db)
+

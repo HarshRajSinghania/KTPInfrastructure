@@ -10,12 +10,12 @@ from pathlib import Path
 
 try:  # direct script execution
     from team_score_telemetry import (
-        MIGRATION, SETTLEMENT_SECONDS, ImportResult, JsonlValidationError,
+        MIGRATIONS, SETTLEMENT_SECONDS, ImportResult, JsonlValidationError,
         MysqlCli, MysqlCommandError, read_event_files,
     )
 except ModuleNotFoundError:  # package import in tests/tooling
     from scripts.team_score_telemetry import (
-        MIGRATION, SETTLEMENT_SECONDS, ImportResult, JsonlValidationError,
+        MIGRATIONS, SETTLEMENT_SECONDS, ImportResult, JsonlValidationError,
         MysqlCli, MysqlCommandError, read_event_files,
     )
 
@@ -45,8 +45,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--migrate", action="store_true",
-                        help="apply the idempotent migration before import")
-    parser.add_argument("--migration", type=Path, default=MIGRATION)
+                        help="apply the idempotent migrations (023, then 032) before import")
+    parser.add_argument("--migration", type=Path, action="append",
+                        help="migration file to apply instead of the defaults; repeatable, applied in order")
     _connection_args(parser)
     return parser.parse_args(argv)
 
@@ -101,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 host=args.host, port=args.port, user=args.user,
             )
             if args.migrate:
-                mysql.apply_migration(args.migration)
+                mysql.apply_migrations(args.migration or MIGRATIONS)
             result = mysql.import_observations(parsed)
     except (FileNotFoundError, JsonlValidationError, MysqlCommandError, ValueError) as exc:
         print(f"team-score import: {exc}", file=sys.stderr)

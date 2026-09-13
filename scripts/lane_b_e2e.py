@@ -1182,7 +1182,8 @@ def main() -> int:
         # rows, the server row, and the server config. A row inserted after it
         # boots is not live and its log lines are dropped without an error.
         db.prepare(schema_files=list(args.schema), seed_files=list(args.seed))
-        db.load_file(team_score_telemetry.MIGRATION)
+        for migration in team_score_telemetry.MIGRATIONS:
+            db.load_file(migration)
         db.assert_action_seeded("assist", for_pa="0", for_ppa="1")
         db.assert_action_seeded("cap_break", for_pa="1", for_ppa="0")
         report["schema_repairs"] = HlstatsDaemon.repair_reconstructed_schema(db)

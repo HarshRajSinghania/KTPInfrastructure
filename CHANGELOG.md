@@ -4,6 +4,31 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `sql`: the official team-score ledger names the HUD observer as its producer (2026-09-13)
+
+`ktp_team_score_observations` holds the engine's team score as relayed by the
+HUD observer (KTPHudObserver), not the captain-reported league score in the
+website's database. Nothing in the table said so: `source` names what the value
+is, and the table comment read "official engine team-score observations".
+
+- New `sql/migrate_032_team_score_producer.sql` adds `producer VARCHAR(32)`
+  (ascii, NOT NULL) to `ktp_team_score_observations` (after `source_version`)
+  and `ktp_team_score_ingest_manifests` (after `source_server`), with CHECK
+  constraints pinning it to `KTPHudObserver`. Both table comments now say the
+  score is relayed by the HUD observer and is not the captain-reported league
+  score.
+- 032 is idempotent, refuses any shape other than migration 023's, finishes a
+  partial run, and verifies its result. Existing rows are backfilled by the
+  column default, which is then dropped so a writer has to name the producer.
+- Migration 023's verifier now accepts the post-032 shape as well as its own,
+  so re-running 023 (including via `--migrate`) still passes after 032.
+- The importer writes `producer` explicitly into both ledgers. `--migrate`
+  applies 023 then 032, and `--migration` is repeatable and replaces that list.
+  Lane B loads both.
+- Apply order: a fresh database gets 023 then 032. Production `hlstatsx`
+  already has 023 and needs 032 through the migration queue before its first
+  import.
+
 ### `scripts`: `report_sync` retries a transient Supabase read instead of failing the tick (2026-09-13)
 
 `ktp-reports.service` failed 18 of 200 runs in the week to 2026-09-12, every one
