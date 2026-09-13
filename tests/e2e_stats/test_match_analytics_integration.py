@@ -243,7 +243,12 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
         "capture_health": False,
         "objective_attempts": False,
         "grenade_entities": False,
+        "player_halves": True,
     }
+    assert report["player_halves"]["status"] == "available"
+    assert report["player_halves"]["reconciled"] is True
+    assert report["in_game_result"]["status"] == "unavailable"
+    assert report["in_game_result"]["flags"] == ["observer-root-not-configured"]
     assert report["telemetry_lifecycles"] == {
         "privacy": "aggregate_public_private_timeline",
         "objective_attempts": {"status": "not_captured"},
@@ -260,7 +265,7 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
             )
         else:
             assert player["damage_per_life"] is None
-    assert report["schema_version"] == 9
+    assert report["schema_version"] == 10
     assert report["shadow_timelines"]["status"] == "available"
     assert len(report["shadow_timelines"]["opening_duels"]) == 2
     assert report["shadow_timelines"]["fast_multikills"] == []

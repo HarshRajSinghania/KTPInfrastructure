@@ -39,6 +39,7 @@ from pathlib import Path
 
 from scripts.ktpr_season import build_ktpr_v22
 from scripts.analytics_report_dto import PROVISIONAL_NOTICE, _name, ktpr_display
+from scripts.in_game_result import DEFAULT_OBSERVER_ROOT
 from scripts.report_scope import (
     IN_SCOPE, OFFICIAL_MATCH_TYPES, classify, match_scope_columns, print_held)
 
@@ -286,7 +287,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
     for match_id in ids:
         try:
             report = ma.build_report(db, match_id, Path("production"),
-                                     sources=sources)
+                                     sources=sources,
+                                     observer_root=args.observer_root)
             if scorer:
                 try:
                     report["accumulation"] = scorer(db, match_id)
@@ -660,6 +662,9 @@ def main(argv: list[str] | None = None) -> int:
                      help="only auto-discover matches with start_time >= "
                           "this ('YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'); "
                           "ignored when match_ids are given explicitly")
+    gen.add_argument("--observer-root", type=Path, default=DEFAULT_OBSERVER_ROOT,
+                     help="KTPHudObserver matches directory the in-game "
+                          "result is read from (read only)")
     agg = sub.add_parser("aggregate")
     # Required with no default, like report_sync's: an aggregate that forgot
     # its floor pools pre-season test reports into the published season.

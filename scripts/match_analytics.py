@@ -80,9 +80,12 @@ from scripts.match_timelines import (  # noqa: E402
 )
 
 
+from scripts.in_game_result import load_in_game_result, unavailable as in_game_unavailable  # noqa: E402
+from scripts.player_halves import build_player_halves  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 9  # 8: positional shadow blocks; 9: spatial_layers (occupancy/hotspots/lanes on world_256_v1)
+SCHEMA_VERSION = 10  # 8: positional shadow blocks; 9: spatial_layers; 10: in_game_result + player_halves
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -319,7 +322,12 @@ SELECT
     AS legacy_match_cache,
   EXISTS(SELECT 1 FROM hlstats_Actions
     WHERE game = 'dod' AND code = 'assist')
-    AS assists
+    AS assists,
+  ((SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND column_name = 'half'
+      AND table_name IN ('hlstats_Events_Frags', 'hlstats_Events_Teamkills',
+                         'hlstats_Events_Suicides', 'hlstats_Events_Statsme')) = 4)
+    AS player_halves
 """))
     if not rows:
         raise RuntimeError("could not inventory analytics source capabilities")
@@ -1356,6 +1364,7 @@ def build_report(
     life_config: LifeExplorationConfig | None = None,
     positional_config: PositionalConfig | None = None,
     spatial_config: SpatialLayersConfig | None = None,
+    observer_root: Path | None = None,
 ) -> dict[str, Any]:
     sources = sources or source_capabilities(db)
     capture_authorization = match_capture_authorization(
@@ -1627,6 +1636,26 @@ def build_report(
         source_available=bool(sources.get("positions", False)),
         temporal_valid=source_mode != "replay",
     )
+    player_halves = build_player_halves(
+        query_rows(db, "player_half_fact.sql", match_id)
+        if sources.get("player_halves", False) else None,
+        players_public,
+        per_hit_damage=bool(sources.get("per_hit_damage", False)),
+        temporal_valid=source_mode != "replay",
+    )
+    closed_halves = [
+        (int(row["half"]), None if row["match_type"] in (None, "NULL") else int(row["match_type"]))
+        for row in tsv_rows(db.sql(
+            "SELECT half, match_type FROM ktp_matches "
+            f"WHERE match_id={sql_literal(match_id)} AND half > 0 "
+            "AND end_time IS NOT NULL ORDER BY half"))
+    ]
+    in_game_result = (
+        load_in_game_result(observer_root, match_id,
+                            map_name=(match or {}).get("map_name"),
+                            closed_halves=closed_halves)
+        if source_mode != "replay" else in_game_unavailable("replay-source")
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1641,6 +1670,8 @@ def build_report(
         "source_inventory": inventory,
         "teams": team_summary(players_public),
         "players": players_public,
+        "player_halves": player_halves,
+        "in_game_result": in_game_result,
         "duel_matrix": build_duel_matrix(frag_timeline, players_public),
         "assists": with_team_names(assists),
         "weapons": with_team_names(weapons),
