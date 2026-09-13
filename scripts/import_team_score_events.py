@@ -19,10 +19,13 @@ except ModuleNotFoundError:  # package import in tests/tooling
         MysqlCli, MysqlCommandError, read_event_files,
     )
 
+LAN_DATABASE = "hlstatsx_lan"
+
 
 def _connection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--mysql-bin", default="mysql")
-    parser.add_argument("--database", default="hlstatsx_lan")
+    parser.add_argument("--database", default=None,
+                        help=f"default {LAN_DATABASE}; production is hlstatsx")
     parser.add_argument("--defaults-extra-file", type=Path)
     parser.add_argument("--socket", type=Path)
     parser.add_argument("--host")
@@ -78,6 +81,12 @@ def _source_server_roots(values: list[str]) -> dict[str, Path]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # On the production box the LAN default would create the ledger in the wrong schema and report success.
+    if args.migrate and args.database is None:
+        print(f"team-score import: --migrate needs an explicit --database "
+              f"(the default is the LAN schema {LAN_DATABASE})", file=sys.stderr)
+        return 2
+    database = args.database or LAN_DATABASE
     try:
         parsed = read_event_files(
             args.events, settlement_seconds=args.settlement_seconds,
@@ -87,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             result = _validated_only(parsed)
         else:
             mysql = MysqlCli(
-                mysql_bin=args.mysql_bin, database=args.database,
+                mysql_bin=args.mysql_bin, database=database,
                 defaults_extra_file=args.defaults_extra_file, socket=args.socket,
                 host=args.host, port=args.port, user=args.user,
             )
