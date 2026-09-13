@@ -59,6 +59,34 @@ but production rollout should normally keep schema deployment as its own
 reviewed step. The importer uses the local MySQL client and local/mounted files;
 it contains no SSH or live-tail behavior.
 
+### Production (data server)
+
+Four rules, each one a way this command has been or could be run wrong:
+
+- **Always pass `--database hlstatsx`.** The default is the LAN schema,
+  `hlstatsx_lan`.
+- **Never pass `--migrate`.** Migration 023 is already applied to `hlstatsx`,
+  and schema changes go through the migration queue. Combined with the default
+  database, `--migrate` would create the ledger in the LAN schema and import
+  there, reporting success. The importer now refuses `--migrate` unless
+  `--database` is explicit.
+- **Run `--validate-only` first.** It reads the files and never builds a MySQL
+  client, so it takes no lock and writes nothing. It also cannot check the
+  closed `ktp_matches` rows that the real import requires, so confirm those
+  separately.
+- **Pre-filter the inputs.** The first file that fails validation fails the
+  whole batch, and only settled matches carrying producer rows belong in it:
+
+```bash
+M=/opt/hud-observer/matches
+grep -l -F '"source":"engine-team-score-v1"' "$M"/*/events.jsonl
+```
+
+Pass one `--source-server-root "SOURCE_SERVER=$M"` for each distinct
+`sourceServer` in those files' `metadata.json`. The values contain spaces
+(`KTP - New York 1`), so quote them. Run the script from a checkout of `main`
+you have verified; a deployed copy on the box can lag behind it.
+
 Exact raw-row duplicates are idempotent. A different raw row at the same order
 key is never chosen arbitrarily or used to overwrite an incumbent: the key is
 audited in `ktp_team_score_ingest_conflicts`, future writes for that key remain

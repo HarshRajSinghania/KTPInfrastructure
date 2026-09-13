@@ -4,6 +4,40 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: `report_sync` retries a transient Supabase read instead of failing the tick (2026-09-13)
+
+`ktp-reports.service` failed 18 of 200 runs in the week to 2026-09-12, every one
+an `HTTP Error 504: Gateway Timeout` on a PostgREST GET (`match_report` or
+`season_aggregate`) against an empty table, arriving about five seconds in. No
+POST has ever failed. Nothing was lost, since the next tick re-reads, but each
+failure was an unalerted red run.
+
+- `supabase()` retries a GET on 500/502/503/504, a timeout or a dropped
+  connection, sleeping 5s, 15s and 45s between attempts, and logs each retry to
+  stderr. After the last attempt the error is raised, so the run still exits
+  non-zero during a real outage.
+- A 4xx is never retried, and neither is a POST: a gateway 504 does not say
+  whether the insert committed, and the next tick's read-then-diff is the safe retry.
+- `ktp-reports.service` gains `OnFailure=ktp-systemd-alert@%n.service`. It needs
+  a reinstall of the unit to take effect.
+- The `__main__` guard restores the stock excepthook. Ubuntu's apport hook
+  builds its path from `sys.argv[0]`, which is `-m` under `python3 -m`, and its
+  own `FileNotFoundError` doubled every traceback in the log.
+
+### `scripts`: the team-score importer refuses `--migrate` without an explicit `--database` (2026-09-13)
+
+`import_team_score_events.py` defaults `--database` to the LAN schema
+`hlstatsx_lan`. On the production data server, `--migrate` with that default
+would create the ledger tables in the wrong schema and import into them,
+reporting success, while production `hlstatsx` already carries migration 023.
+
+- `--migrate` now exits 2 unless `--database` is given. Without `--migrate`, the
+  default is unchanged, and the documented LAN command already passes
+  `--database hlstatsx_lan`.
+- `docs/OFFICIAL_TEAM_SCORE_TELEMETRY.md` gains a production section: pass
+  `--database hlstatsx`, never `--migrate`, run `--validate-only` first, and
+  pre-filter the inputs, because one bad file fails the whole batch.
+
 ### `scripts`: `sync-runner-stack.py`'s "not during a run" guard can fire now (2026-09-12)
 
 The guard ran `pgrep -af '<runner tree>'` and looked for `hlds_linux` in the
