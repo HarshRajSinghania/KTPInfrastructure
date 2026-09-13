@@ -6,6 +6,7 @@ Wants=network-online.target
 # report_sync already retries a transient Supabase read, so a run that still
 # fails is an outage or a real error, and worth a Discord alert.
 OnFailure=ktp-systemd-alert@%n.service
+# The journal only records exit-code; stdout/stderr go to /var/log/ktp-report-service.log, so read the cause there.
 
 [Service]
 Type=oneshot
