@@ -150,6 +150,9 @@ SET @m23_manifest_columns := (
 SET @m23_manifest_total_columns := (
  SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
  AND TABLE_NAME='ktp_team_score_ingest_manifests');
+SET @m23_manifest_producer := (
+ SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
+ AND TABLE_NAME='ktp_team_score_ingest_manifests' AND COLUMN_NAME='producer');
 SET @m23_manifest_bad := (
  SELECT COALESCE(SUM(CASE COLUMN_NAME
  WHEN 'match_id' THEN NOT(DATA_TYPE='varchar' AND CHARACTER_MAXIMUM_LENGTH=64 AND COLLATION_NAME='utf8mb4_bin' AND IS_NULLABLE='NO')
@@ -173,6 +176,7 @@ SET @m23_manifest_bad := (
  WHEN 'match_end_axis_score' THEN NOT(DATA_TYPE='int' AND LOCATE('unsigned',COLUMN_TYPE)>0 AND IS_NULLABLE='YES')
  WHEN 'retention_class' THEN NOT(COLUMN_TYPE='enum(''retained'',''ephemeral-14d'')' AND IS_NULLABLE='NO')
  WHEN 'ingested_at' THEN NOT(DATA_TYPE='timestamp' AND DATETIME_PRECISION=3 AND IS_NULLABLE='NO')
+ WHEN 'producer' THEN NOT(DATA_TYPE='varchar' AND CHARACTER_MAXIMUM_LENGTH=32 AND COLLATION_NAME='ascii_bin' AND IS_NULLABLE='NO' AND COLUMN_DEFAULT IS NULL)
  ELSE 0 END),0) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
  AND TABLE_NAME='ktp_team_score_ingest_manifests');
 SET @m23_manifest_table := (SELECT COUNT(*)=1 FROM information_schema.TABLES
@@ -195,7 +199,7 @@ SET @m23_manifest_extra_unique := (SELECT COUNT(*) FROM (
  AND TABLE_NAME='ktp_team_score_ingest_manifests' AND NON_UNIQUE=0
  AND INDEX_NAME NOT IN ('PRIMARY','uq_team_score_events_path','uq_team_score_metadata_path')
  GROUP BY INDEX_NAME) extra_i);
-SET @m23_ok := (@m23_manifest_columns=21 AND @m23_manifest_total_columns=21 AND @m23_manifest_bad=0 AND
+SET @m23_ok := (@m23_manifest_columns=21 AND @m23_manifest_total_columns=21+@m23_manifest_producer AND @m23_manifest_bad=0 AND
  @m23_manifest_table=1 AND @m23_manifest_primary=1 AND
  @m23_manifest_bad_named=0 AND @m23_manifest_extra_unique=0);
 SET @m23_ddl := IF(@m23_ok,'DO 0','SELECT * FROM ERROR_023_team_score_manifest_partial_or_incompatible');
@@ -210,6 +214,8 @@ SET @m23_observation_columns := (SELECT COUNT(*) FROM information_schema.COLUMNS
  'source_file_sha256','source_path_sha256','source_line_number','ingested_at'));
 SET @m23_observation_total_columns := (SELECT COUNT(*) FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ktp_team_score_observations');
+SET @m23_observation_producer := (SELECT COUNT(*) FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ktp_team_score_observations' AND COLUMN_NAME='producer');
 SET @m23_observation_bad := (SELECT COALESCE(SUM(CASE COLUMN_NAME
  WHEN 'id' THEN NOT(DATA_TYPE='bigint' AND LOCATE('unsigned',COLUMN_TYPE)>0 AND LOCATE('auto_increment',EXTRA)>0 AND IS_NULLABLE='NO')
  WHEN 'match_id' THEN NOT(DATA_TYPE='varchar' AND CHARACTER_MAXIMUM_LENGTH=64 AND COLLATION_NAME='utf8mb4_bin' AND IS_NULLABLE='NO')
@@ -235,6 +241,7 @@ SET @m23_observation_bad := (SELECT COALESCE(SUM(CASE COLUMN_NAME
  WHEN 'source_path_sha256' THEN NOT(DATA_TYPE='binary' AND CHARACTER_MAXIMUM_LENGTH=32 AND IS_NULLABLE='NO')
  WHEN 'source_line_number' THEN NOT(DATA_TYPE='bigint' AND LOCATE('unsigned',COLUMN_TYPE)>0 AND IS_NULLABLE='NO')
  WHEN 'ingested_at' THEN NOT(DATA_TYPE='timestamp' AND DATETIME_PRECISION=3 AND IS_NULLABLE='NO')
+ WHEN 'producer' THEN NOT(DATA_TYPE='varchar' AND CHARACTER_MAXIMUM_LENGTH=32 AND COLLATION_NAME='ascii_bin' AND IS_NULLABLE='NO' AND COLUMN_DEFAULT IS NULL)
  ELSE 0 END),0) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
  AND TABLE_NAME='ktp_team_score_observations');
 SET @m23_observation_table := (SELECT COUNT(*)=1 FROM information_schema.TABLES
@@ -256,7 +263,7 @@ SET @m23_observation_extra_unique := (SELECT COUNT(*) FROM (
  SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE()
  AND TABLE_NAME='ktp_team_score_observations' AND NON_UNIQUE=0
  AND INDEX_NAME NOT IN ('PRIMARY','uq_team_score_order') GROUP BY INDEX_NAME) extra_i);
-SET @m23_ok := (@m23_observation_columns=24 AND @m23_observation_total_columns=24 AND @m23_observation_bad=0 AND
+SET @m23_ok := (@m23_observation_columns=24 AND @m23_observation_total_columns=24+@m23_observation_producer AND @m23_observation_bad=0 AND
  @m23_observation_table=1 AND @m23_observation_primary=1 AND
  @m23_observation_bad_named=0 AND @m23_observation_extra_unique=0);
 SET @m23_ddl := IF(@m23_ok,'DO 0','SELECT * FROM ERROR_023_team_score_observation_partial_or_incompatible');
@@ -366,7 +373,8 @@ SET @m23_ddl := IF(@m23_ok,'DO 0','SELECT * FROM ERROR_023_team_score_audit_part
 PREPARE m23_stmt FROM @m23_ddl; EXECUTE m23_stmt; DEALLOCATE PREPARE m23_stmt;
 
 -- Defaults, referential actions, and check bodies are part of the schema
--- contract, not incidental metadata. Fail closed on any drift.
+-- contract, not incidental metadata. Fail closed on any drift. The producer
+-- checks from migration 032 are accepted only on the table carrying the column.
 SET @m23_timestamp_defaults := (SELECT COUNT(*) FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA=DATABASE() AND (
   (TABLE_NAME='ktp_team_score_ingest_manifests' AND COLUMN_NAME='ingested_at') OR
@@ -407,7 +415,10 @@ SET @m23_check_count := (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAIN
 SET @m23_bad_checks := (SELECT COUNT(*) FROM (
  SELECT t.TABLE_NAME,t.CONSTRAINT_NAME,
   LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.CHECK_CLAUSE,
-    '`',''),' ',''),'(',''),')',''),CHAR(9),''),CHAR(10),''),CHAR(13),'')) AS clause
+    '`',''),' ',''),'(',''),')',''),CHAR(9),''),CHAR(10),''),CHAR(13),'')) AS clause,
+  REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.CHECK_CLAUSE,
+    '`',''),' ',''),'(',''),')',''),CHAR(9),''),CHAR(10),''),CHAR(13),''),CHAR(92),''),
+    '_[A-Za-z0-9]+''','''') AS exact_clause
  FROM information_schema.TABLE_CONSTRAINTS t
  JOIN information_schema.CHECK_CONSTRAINTS c
    ON c.CONSTRAINT_SCHEMA=t.CONSTRAINT_SCHEMA AND c.CONSTRAINT_NAME=t.CONSTRAINT_NAME
@@ -422,10 +433,15 @@ SET @m23_bad_checks := (SELECT COUNT(*) FROM (
   (CONSTRAINT_NAME='chk_team_score_half' AND clause='halfin1,2orhalf>=101') OR
   (CONSTRAINT_NAME='chk_team_score_source_version' AND clause='source_version=1') OR
   (CONSTRAINT_NAME='chk_team_score_conflict_hashes' AND clause='incumbent_raw_sha256<>rejected_raw_sha256') OR
-  (CONSTRAINT_NAME='chk_team_score_audit_terminal_half' AND clause='terminal_halfin1,2orterminal_half>=101')
+  (CONSTRAINT_NAME='chk_team_score_audit_terminal_half' AND clause='terminal_halfin1,2orterminal_half>=101') OR
+  (TABLE_NAME='ktp_team_score_observations' AND CONSTRAINT_NAME='chk_team_score_producer'
+   AND @m23_observation_producer=1 AND BINARY exact_clause=BINARY 'producer=''KTPHudObserver''') OR
+  (TABLE_NAME='ktp_team_score_ingest_manifests' AND CONSTRAINT_NAME='chk_team_score_manifest_producer'
+   AND @m23_manifest_producer=1 AND BINARY exact_clause=BINARY 'producer=''KTPHudObserver''')
  ));
 SET @m23_ok := (@m23_timestamp_defaults=4 AND @m23_fk_ok=1
- AND @m23_check_count=8 AND @m23_bad_checks=0);
+ AND @m23_check_count=8+@m23_observation_producer+@m23_manifest_producer
+ AND @m23_bad_checks=0);
 SET @m23_ddl := IF(@m23_ok,'DO 0','SELECT * FROM ERROR_023_team_score_constraint_or_default_incompatible');
 PREPARE m23_stmt FROM @m23_ddl; EXECUTE m23_stmt; DEALLOCATE PREPARE m23_stmt;
 

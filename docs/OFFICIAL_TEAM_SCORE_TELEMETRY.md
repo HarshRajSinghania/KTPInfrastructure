@@ -5,6 +5,19 @@ the HUD observer as `source: "engine-team-score-v1"`. It is deliberately
 separate from player points, capture credits, KTPR, and the experimental
 accumulation models.
 
+## Provenance
+
+These tables hold the game engine's own team score, relayed by the HUD observer
+(KTPHudObserver). They are **not** the captain-reported league score. That one
+is `ktp.match.home_score` / `away_score` in the website's database, and nothing
+copies between the two.
+
+Migration 032 records this on the rows themselves. `ktp_team_score_observations`
+and `ktp_team_score_ingest_manifests` carry a `producer` column that is always
+`KTPHudObserver`, pinned by a CHECK constraint, and both table comments say the
+same. The column has no default, so the importer writes it explicitly and a
+writer that leaves it out fails.
+
 ## Authority and ordering
 
 - Only official-v1 `team_score` rows are eligible.
@@ -21,13 +34,30 @@ accumulation models.
 
 ## Local migration and import
 
-Apply `sql/migrate_023_team_score_observations.sql` with the normal local
-MySQL/MariaDB migration account. The migration is forward-only and idempotent.
-It creates a closed-file ingestion-manifest ledger, an append-only observation
-ledger, and a separate conflict-audit ledger. Reapplying migration 023 verifies
-the exact table/column/collation/unique-index contract, repairs only compatible
-missing named indexes, and fails on partial or incompatible pre-existing
-schema.
+Apply `sql/migrate_023_team_score_observations.sql`, then
+`sql/migrate_032_team_score_producer.sql`, with the normal local MySQL/MariaDB
+migration account. Both are forward-only and idempotent. 023 creates a
+closed-file ingestion-manifest ledger, an append-only observation ledger, and a
+separate conflict-audit ledger. 032 adds the `producer` column and its CHECK to
+the observation and manifest ledgers and rewrites their table comments.
+
+Reapplying migration 023 verifies the exact table/column/collation/unique-index
+contract, repairs only compatible missing named indexes, and fails on partial or
+incompatible pre-existing schema. It accepts the schema both before and after
+032, so it stays safe to re-run in either state. 032 refuses to run unless the
+tables have exactly the migration-023 shape (optionally with a partial 032 it
+can finish), and it verifies its own result before returning.
+
+The order is always 023 then 032:
+
+| Database | What to apply |
+|---|---|
+| Fresh (LAN, test) | 023, then 032. `--migrate` does both, in that order. |
+| Production `hlstatsx` (023 already applied) | 032 only, through the migration queue. |
+| Re-run, once 023 is in place | Either file, any number of times. |
+
+If a table already holds rows when 032 runs, the column default backfills them
+with `KTPHudObserver` before the default is dropped.
 
 Each input must be a non-symlink `MATCH_ID/events.jsonl` with the producer's
 adjacent `MATCH_ID/metadata.json`. The metadata must own the same match, map,
@@ -54,14 +84,14 @@ use the path that deployment actually writes rather than assuming either
 example generalizes.
 
 Use `--validate-only` to perform the full source/schema/settlement validation
-without a database write. `--migrate` applies the repository migration first,
+without a database write. `--migrate` applies migrations 023 and 032 first,
 but production rollout should normally keep schema deployment as its own
 reviewed step. The importer uses the local MySQL client and local/mounted files;
 it contains no SSH or live-tail behavior.
 
 ### Production (data server)
 
-Four rules, each one a way this command has been or could be run wrong:
+Five rules, each one a way this command has been or could be run wrong:
 
 - **Always pass `--database hlstatsx`.** The default is the LAN schema,
   `hlstatsx_lan`.
@@ -70,6 +100,9 @@ Four rules, each one a way this command has been or could be run wrong:
   database, `--migrate` would create the ledger in the LAN schema and import
   there, reporting success. The importer now refuses `--migrate` unless
   `--database` is explicit.
+- **Apply migration 032 before the first import.** It goes through the queue
+  like any other schema change. Against a 023-only schema the importer fails on
+  the unknown `producer` column rather than writing unlabelled rows.
 - **Run `--validate-only` first.** It reads the files and never builds a MySQL
   client, so it takes no lock and writes nothing. It also cannot check the
   closed `ktp_matches` rows that the real import requires, so confirm those
