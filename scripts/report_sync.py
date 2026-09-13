@@ -33,6 +33,8 @@ import os
 import re
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 from scripts.analytics_report_dto import assert_sanitized, sanitize_report
@@ -74,6 +76,27 @@ def mysql(query: str) -> str:
     return proc.stdout
 
 
+# Supabase's gateway 504s the odd read of an empty table; the next attempt answers.
+READ_RETRY_DELAYS = (5, 15, 45)
+RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+
+
+def _send(url: str, method: str, data, headers: dict):
+    req = urllib.request.Request(url, data=data, headers=headers,
+                                 method=method)
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else None
+
+
+def _transient(exc: Exception) -> bool:
+    # HTTPError is a URLError, so the status check has to come first.
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in RETRYABLE_STATUS
+    return isinstance(exc, (urllib.error.URLError, TimeoutError,
+                            ConnectionError))
+
+
 def supabase(path: str, method: str = "GET", body=None):
     url = os.environ["KTP_SUPABASE_URL"].rstrip("/") + path
     key = os.environ["KTP_SUPABASE_SECRET_KEY"]
@@ -85,11 +108,19 @@ def supabase(path: str, method: str = "GET", body=None):
         "Content-Type": "application/json",
     }
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(url, data=data, headers=headers,
-                                 method=method)
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else None
+    # Never a POST: a 504 does not say whether the insert committed, and the
+    # next tick's read-then-diff is the safe retry.
+    delays = READ_RETRY_DELAYS if method == "GET" else ()
+    for attempt, delay in enumerate((*delays, None), 1):
+        try:
+            return _send(url, method, data, headers)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if delay is None or not _transient(exc):
+                raise
+            print(f"supabase {method} {path.partition('?')[0]}: {exc}; "
+                  f"retry {attempt}/{len(delays)} in {delay}s",
+                  file=sys.stderr)
+            time.sleep(delay)
 
 
 def supabase_all(path: str) -> list[dict]:
@@ -254,4 +285,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Ubuntu's apport hook stats sys.argv[0], which is "-m" here, and buries the real traceback.
+    sys.excepthook = sys.__excepthook__
     raise SystemExit(main())
