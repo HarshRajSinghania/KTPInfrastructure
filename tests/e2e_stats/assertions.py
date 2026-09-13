@@ -982,8 +982,8 @@ def check_damage_ledger(db, *, emitted: int) -> dict:
 
 def check_shot_events(db, *, emitted: int, match_id: str | None = None,
                        half: int | None = None) -> dict:
-    """Did every emitted `shot` marker land in `ktp_shot_events`, and does
-    each attacker's shot count cover their damage-dealt count?
+    """Did every emitted `shot` marker land in `ktp_shot_events`, and did
+    every attacker who dealt damage have at least one shot row backing it?
 
     ENGINE_STATS_EXPANSION_PLAN_20260909.md wave 0. Tolerant of
     `ktp_shot_events` not existing at all -- migrate_027 is new; a corpus log
@@ -991,14 +991,22 @@ def check_shot_events(db, *, emitted: int, match_id: str | None = None,
     coverage gap (this run cannot judge the stream), not a defect, same
     reasoning as `check_damage_ledger` above.
 
-    The per-attacker invariant (shots >= damage rows where they're attacker,
-    within the same match/half) is the cheapest proof the stream is real
-    rather than an artifact of the batched insert: dealing damage requires a
-    prior weapon-fire dispatch -- ktp_stats_capture.inc emits `shot` for
-    every actuation the clip-decrement detector sees, melee included, with no
-    weapon-type filter -- so a player with more damage rows than shot rows in
-    the same scope means rows were lost on the way in, not that they played
-    differently. Only checked when scoped to a match_id + half; unscoped
+    The per-attacker invariant used to require shot_rows >= damage_rows,
+    reasoning that dealing damage requires a prior weapon-fire dispatch. That
+    is true, but the 1:1-or-better counting was not: run 34738350664 failed
+    it with a single grenade throw (one `shot` row) whose splash produced TWO
+    `ktp_damage_events` rows against different victims in the same tick --
+    correct DoD behavior, not lost rows. Rifle penetration can do the same
+    (see `cmd_all_traces`'s own doc comment on multi-victim bullets), and the
+    harness's own scenario staging (assist/cap-break/degraded-killer) injects
+    synthetic damage lines under a placeholder weapon name that was never
+    fired by anyone, by design.
+    So the check now asks the weaker, still-real question: did a `shot` row
+    exist AT ALL for an attacker who dealt damage? That still catches the
+    actual failure mode it exists for -- an attacker's fire events never
+    reaching `ktp_shot_events` while their damage did -- without failing on
+    legitimate one-shot-many-damage-rows physics or injected test scenarios.
+    Only checked when scoped to a match_id + half; unscoped
     calls (corpus replay with no single match/half to bound the join) skip it
     rather than compare data that never shared a producer context.
     """
@@ -1070,28 +1078,29 @@ WHERE BINARY match_id=BINARY {_sql_literal(match_id)}{half_sql}
     if scope_sql is not None:
         violations = db.count(f"""
 SELECT COUNT(*) FROM (
-    SELECT attacker_id, COUNT(*) AS damage_rows
+    SELECT DISTINCT attacker_id
     FROM ktp_damage_events WHERE {scope_sql}
-    GROUP BY attacker_id
 ) dmg
 LEFT JOIN (
-    SELECT player_id, COUNT(*) AS shot_rows
+    SELECT DISTINCT player_id
     FROM ktp_shot_events WHERE {scope_sql}
-    GROUP BY player_id
 ) sh ON sh.player_id = dmg.attacker_id
-WHERE dmg.damage_rows > COALESCE(sh.shot_rows, 0)
+WHERE sh.player_id IS NULL
 """)
         if violations > 0:
             return {"code": "shot_events", "status": "pipeline", "emitted": emitted,
                     "rows": rows, "invariant_violations": violations, "detail":
-                    f"{violations} player(s) dealt more damage rows than they "
-                    f"have shot rows in the same match/half -- damage cannot "
-                    f"precede the weapon-fire dispatch that caused it, so this "
-                    f"is a shot-stream defect, not a play-style artifact."}
+                    f"{violations} player(s) dealt damage with ZERO shot rows "
+                    f"in the same match/half -- damage cannot precede the "
+                    f"weapon-fire dispatch that caused it, so this is a "
+                    f"shot-stream defect, not a play-style artifact (a "
+                    f"single splash weapon or bullet penetration hitting "
+                    f"more than one victim is expected and does not trip "
+                    f"this check)."}
     return {"code": "shot_events", "status": "ok", "emitted": emitted, "rows": rows,
             "invariant_violations": 0, "detail":
             f"{rows}/{emitted} carried"
-            + (", every attacker's shots covered their damage-dealt count"
+            + (", every attacker who dealt damage had a shot row backing it"
                if scope_sql is not None else "")}
 
 

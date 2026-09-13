@@ -95,6 +95,23 @@ DEFAULT_SCHEMA_FILES = (
     "sql/migrate_024_team_membership_intervals.sql",
     "sql/migrate_025_position_state_map_revision.sql",
     "sql/migrate_027_shot_events.sql",
+    # 028 is load-bearing for 027, not optional: it adds a UNIQUE index over
+    # server_id, match_id, half and producer_sequence that the daemon's
+    # `INSERT ... ON DUPLICATE KEY UPDATE id=id` relies on. Without the index the
+    # upsert has no key to collide with and silently degrades to a plain INSERT,
+    # so a lane running 027 alone exercises the dedup path as a no-op and reports
+    # clean whether or not it works.
+    #
+    # No closing-paren character anywhere above this line, on purpose. The
+    # drift guard in tests/unit/test_lane_b_schema_list_drift.py finds this
+    # tuple's end by splitting the source text on the first closing-paren
+    # character after "DEFAULT_SCHEMA_FILES = ", so one inside a comment above
+    # here truncates every entry that follows it out of DEFAULT_SCHEMA_FILES --
+    # silently, since the truncated list is still valid Python. That is
+    # exactly what a stray one in an earlier version of this comment did.
+    "sql/migrate_028_shot_events_dedup.sql",
+    "sql/migrate_029_shot_target_state.sql",
+    "sql/migrate_030_shot_target_player.sql",
 )
 
 def _md5(path: Path) -> str:
