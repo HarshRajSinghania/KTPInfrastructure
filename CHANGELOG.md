@@ -29,6 +29,20 @@ is, and the table comment read "official engine team-score observations".
   already has 023 and needs 032 through the migration queue before its first
   import.
 
+### `scripts`: `report_sync` sends an explicit `--user` to mysql, like `report_service` (2026-09-13)
+
+`ktpreports` authenticates by `auth_socket` and has no `.my.cnf`. Without
+`--user`, the mysql client sends `root` even under `sudo -u ktpreports`, and the
+server refuses with `ERROR 1698`. `report_service` has sent the flag since the
+#313 correction; `report_sync.mysql()` never did, so the runbook's manual
+`sudo -u ktpreports … report_sync --dry-run` could fail that way. The timer is
+unaffected: under `User=ktpreports` its log shows no 1698.
+
+- `report_sync.mysql()` passes `--user=<effective user>` using
+  `report_service._os_user()`, which reads `pwd.getpwuid(os.geteuid())`. Under
+  the timer that resolves to `ktpreports`, the account it already runs as.
+- A uid with no passwd entry raises before mysql runs rather than dropping the flag.
+
 ### `scripts`: `report_sync` retries a transient Supabase read instead of failing the tick (2026-09-13)
 
 `ktp-reports.service` failed 18 of 200 runs in the week to 2026-09-12, every one
