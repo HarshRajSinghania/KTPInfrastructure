@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from scripts import team_score_telemetry as score
+from scripts import import_team_score_events
 from scripts import project_team_score
 
 
@@ -611,6 +612,53 @@ def test_validate_only_cli_reports_counts_without_mysql(tmp_path):
     assert result["officialRows"] == 1
     assert result["inserted"] == 0
     assert result["conflictKeys"] == 0
+
+
+class _RecordingMysql:
+    built: list[dict] = []
+
+    def __init__(self, **kwargs):
+        _RecordingMysql.built.append(kwargs)
+        self.migrated = False
+
+    def apply_migration(self, path):
+        _RecordingMysql.built[-1]["migrated"] = True
+
+    def import_observations(self, parsed):
+        return import_team_score_events._validated_only(parsed)
+
+
+def _import_main(tmp_path, monkeypatch, *extra):
+    path = write_observer(tmp_path, [official_event()])
+    _RecordingMysql.built = []
+    monkeypatch.setattr(import_team_score_events, "MysqlCli", _RecordingMysql)
+    rc = import_team_score_events.main([
+        "--source-server-root", f"{SOURCE_SERVER}={path.parent.parent}",
+        *extra, str(path),
+    ])
+    return rc, _RecordingMysql.built
+
+
+def test_migrate_without_explicit_database_is_refused_before_any_client(
+        tmp_path, monkeypatch, capsys):
+    rc, built = _import_main(tmp_path, monkeypatch, "--migrate")
+    assert rc == 2
+    assert built == []
+    assert "--database" in capsys.readouterr().err
+
+
+def test_migrate_with_explicit_database_still_runs(tmp_path, monkeypatch):
+    """Control: the refusal is about the implicit default, not --migrate itself."""
+    rc, built = _import_main(tmp_path, monkeypatch,
+                             "--migrate", "--database", "hlstatsx_lan")
+    assert rc == 0
+    assert [(b["database"], b.get("migrated")) for b in built] == [("hlstatsx_lan", True)]
+
+
+def test_import_without_migrate_keeps_the_lan_default(tmp_path, monkeypatch):
+    rc, built = _import_main(tmp_path, monkeypatch)
+    assert rc == 0
+    assert [(b["database"], b.get("migrated")) for b in built] == [("hlstatsx_lan", None)]
 
 
 def test_projector_release_files_are_immutable_and_idempotent(tmp_path):
