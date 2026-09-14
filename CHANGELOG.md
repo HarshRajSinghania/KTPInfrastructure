@@ -4,6 +4,33 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`, `systemd`: the wave ledger reconciles the restart, not the stage call (2026-09-14)
+
+`ktp-wave-ledger.py reconcile` read only the artifacts a wave named, so a restart
+that activated more than the ledger held reported "reconciled". The 2026-09-08
+03:00 swap activated `stats_logging.amxx` and `ktp_cvar.amxx` 7.38 with only
+`stats_logging` in the ledger, and the 2026-09-10 `ktp_cvar` 7.39 stage never
+entered the ledger at all, so reconcile had nothing to say about it.
+
+- `reconcile` now reads every pinned artifact and every staged `.new` on every
+  instance, once, even when no wave is due, and leaves a wave open until the
+  whole fleet agrees with `CLAUDE.md`. Findings: `UNLEDGERED_LIVE`,
+  `LIVE_NOT_ON_ROW`, `ROW_NOT_LIVE` (the row's first md5 is on no instance),
+  `NOT_UNIFORM` (partial activation) and `STAGED_UNLEDGERED` (a `.new` in no
+  pending wave; it fails the run but does not hold an activated wave open).
+- New `sweep` subcommand: the same read, marks nothing, for a timer. Exit 0
+  clean, 1 finding, 2 could not look (unreachable instance, unreadable
+  `CLAUDE.md`, no ledger without `--no-ledger`).
+- `systemd/ktp-wave-sweep.{service,timer}`: 03:45 ET after the swap and 23:45 ET
+  before it, `OnFailure=` alerting. Not installed.
+- The three KTPAMXX artifacts now match their own rows (`KTPAMXX core`,
+  `KTPAMXX dodx`, `stats_logging.amxx`). Against the current table they had
+  fallen back to a file-wide md5 search.
+- KTPFileChecker is `ktp_file.amxx` on the fleet, not `KTPFileChecker.amxx`.
+  The first live sweep reported the row's md5 absent on all 24; `md5sum` finds
+  it in `plugins/ktp_file.amxx`.
+- Game instances only. The data server's artifacts are not swept.
+
 ### `scripts`: match reports carry the in-game result and per-half player rows; `mean_depth` unit stated (2026-09-13)
 
 The public match report had to read its score from the website's `ktp.match`,
