@@ -204,15 +204,20 @@ def test_grenade_viewmodels_enter_even_when_no_source_lists_them(mod, tmp_path):
         assert got[path]["severity"] == "review", path
 
 
-def test_viewmodel_alternates_are_attached_to_their_entries(mod, built):
-    # The AC client's KnownBenignFileVariants allowlists these same (path, hash) pairs,
-    # and its BenignVariantManifestSyncTests fails on a tracked path whose allowlisted
-    # hash is missing here. Dropping the alternate while keeping the path in scope is
-    # the exact disagreement that guard exists to name.
+def test_viewmodels_carry_no_alternate_hashes(mod, built):
+    # Operator ruling 2026-09-14: every modified copy is captured, the known community
+    # pack included. An alternate is exactly what would prevent that -- the client's
+    # AllowedAlternateHashes match returns before it reaches the IsReview branch, so a
+    # re-added alternate here is a silent capture suppressor, not a tidy-up.
     manifest = mod.assemble_manifest(list(built), "fixture", DOD)
     got = _by_path(manifest["files"])
-    for path in ("models/v_grenade.mdl", "models/v_stick.mdl"):
-        assert got[path]["allowed_alternate_hashes"] == mod.ALTERNATE_HASHES[path], path
+    for path in GRENADE_VIEWMODELS:
+        assert not got[path].get("allowed_alternate_hashes"), (
+            f"{path} must be compared against the stock hash alone, so any other copy of "
+            f"it is captured for an admin"
+        )
+    stray = sorted(set(mod.ALTERNATE_HASHES) & set(GRENADE_VIEWMODELS))
+    assert not stray, f"alternate-hash table re-acquired a ruled viewmodel: {stray}"
 
 
 def test_held_and_thrown_grenade_models_still_violate(built):
