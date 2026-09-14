@@ -15,3 +15,4 @@ ratings_*full_history*.json
 # workflow's next step. Only ratings_current.json is versioned state.
 weekly_digest.md
 weekly_summary.json
+seeding_report.md
