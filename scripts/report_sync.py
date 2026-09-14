@@ -14,6 +14,14 @@ rows exist, inserts only the missing ones. Nothing is updated or deleted.
 Environment (operator-provisioned file, e.g. /etc/ktp/report-sync.env):
   KTP_SUPABASE_URL=https://<project>.supabase.co
   KTP_SUPABASE_SECRET_KEY=<service role secret; never the publishable key>
+  KTP_SITE_REVALIDATE_SECRET=<INTERNAL_WARM_SECRET; optional, see revalidate_site()>
+
+After a run that actually POSTs a new row to ktp.match_report, revalidate_site()
+tells ktpleague.gg to drop its cache of the match-report pages. Without it a
+synced report sits behind the site's cacheLife("hours") read until that cache
+entry happens to turn over on its own -- up to about an hour. This step is
+best-effort: it logs loudly and moves on rather than failing a run that already
+committed rows.
 
 Usage (from the KTPInfrastructure repo root):
   python3 -m scripts.report_sync --since 2026-09-13 [--dry-run]
@@ -54,6 +62,13 @@ SYNCABLE_AGGREGATE_KINDS = {"map_profiles", "leaderboard_ktpr_v22",
 PAGE_SIZE = 500
 # A server that ignores `offset` would otherwise page forever on one result.
 MAX_PAGES = 4000
+
+# The endpoint's body schema only accepts these four (searse/keep-the-prac
+# src/app/api/internal/revalidate/route.ts); "match-reports" is a TAG name
+# inside scopes.ts, not a POST-able scope. "ktp" is the narrowest of the four
+# whose tag list carries MATCH_REPORTS_TAG.
+REVALIDATE_SCOPE = "ktp"
+REVALIDATE_TIMEOUT = 10
 
 SINCE_RE = re.compile(r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?")
 
@@ -267,6 +282,54 @@ def sync_aggregates(dry_run: bool) -> int:
     return synced
 
 
+def _revalidate_transient(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError))
+
+
+def revalidate_site() -> None:
+    """Tell ktpleague.gg its match-report cache is stale.
+
+    Best-effort only -- by the time this runs, sync_reports() has already
+    committed rows to Supabase, so a failure here must never fail the run
+    (report_service.log alerting on a run this step killed would train
+    everyone to ignore the alert). One retry, only for a transient failure;
+    a bad secret (401) or a bad request (4xx) is not worth a second attempt.
+    """
+    secret = os.environ.get("KTP_SITE_REVALIDATE_SECRET")
+    if not secret:
+        print("KTP_SITE_REVALIDATE_SECRET is unset; skipping the site "
+              "revalidate -- the synced report will wait for the site's "
+              "own hourly cache refresh", file=sys.stderr)
+        return
+    url = os.environ.get("KTP_SITE", "https://ktpleague.gg") + "/api/internal/revalidate"
+    body = json.dumps({"scope": REVALIDATE_SCOPE}).encode("utf-8")
+    headers = {"content-type": "application/json",
+               "x-internal-revalidate": secret}
+    last_err: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers,
+                                         method="POST")
+            with urllib.request.urlopen(req, timeout=REVALIDATE_TIMEOUT) as resp:
+                resp.read()
+            print(f"site revalidate: scope={REVALIDATE_SCOPE} ok "
+                  f"(attempt {attempt})")
+            return
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            last_err = exc
+            if attempt == 2 or not _revalidate_transient(exc):
+                break
+            print(f"site revalidate: transient error, retrying once: {exc}",
+                  file=sys.stderr)
+    # Never the secret value -- only the exception, which carries the URL and
+    # HTTP status but not the header we sent.
+    print(f"site revalidate FAILED, scope={REVALIDATE_SCOPE}: {last_err} -- "
+          "the synced report will wait for the site's own hourly cache "
+          "refresh", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true")
@@ -282,6 +345,10 @@ def main(argv: list[str] | None = None) -> int:
     n = sync_reports(args.dry_run, args.since)
     m = sync_aggregates(args.dry_run)
     print(f"done: {n} reports, {m} aggregates")
+    # sync_reports() raises on any failed POST, so reaching here with n > 0
+    # means every one of those rows actually committed to Supabase.
+    if n and not args.dry_run:
+        revalidate_site()
     return 0
 
 

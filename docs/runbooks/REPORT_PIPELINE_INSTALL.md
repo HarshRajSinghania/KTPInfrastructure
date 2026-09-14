@@ -151,11 +151,22 @@ Then write into `/etc/ktp/reports.env`:
 ```
 KTP_SUPABASE_URL=https://yxpjfenpnwksvvquqlde.supabase.co
 KTP_SUPABASE_SECRET_KEY=<service-role secret>
+KTP_SITE_REVALIDATE_SECRET=<INTERNAL_WARM_SECRET>
 ```
 
 This is the **service-role** secret, not the publishable key. The publishable
 key is read-only and public by design; this job writes. It must never reach a
 game server or the website repo.
+
+`KTP_SITE_REVALIDATE_SECRET` is the site's `INTERNAL_WARM_SECRET` (same value
+the warm/purge endpoints use, not a new one). After a run that POSTs at least
+one new row to `ktp_match_reports`, `report_sync.revalidate_site()` sends it as
+`x-internal-revalidate` to `https://ktpleague.gg/api/internal/revalidate` with
+`{"scope": "ktp"}`, so `/stats/matches` stops waiting for its own hourly cache
+turnover. Optional by design: if it is unset, `report_sync` logs one warning
+and continues -- it never fails the run over a missing cache-refresh secret.
+On an HTTP error or a network timeout it retries once, logs loudly, and still
+returns 0; the synced report simply waits for the site's own cache turnover.
 
 ## 4. Install the units
 
