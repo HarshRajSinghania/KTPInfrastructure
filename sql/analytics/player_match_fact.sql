@@ -95,10 +95,17 @@ damage AS (
     GROUP BY r.player_id
 ),
 captures AS (
-    SELECT player_id, COUNT(*) AS capture_credits
-    FROM ktp_flag_captures
-    WHERE match_id = {{MATCH_ID}}
-    GROUP BY player_id
+    -- Excludes warmup bleed-through: a capture attempt begun before the
+    -- half's own KTP_MATCH_START can still complete a moment after the
+    -- daemon's round_live flag flips, landing tagged with the new half.
+    -- Real captures need several seconds and can never complete within
+    -- the same rounded second as start_time. See capture_credit_fact.sql.
+    SELECT c.player_id, COUNT(*) AS capture_credits
+    FROM ktp_flag_captures c
+    LEFT JOIN ktp_matches m ON m.match_id = c.match_id AND m.half = c.half
+    WHERE c.match_id = {{MATCH_ID}}
+      AND (m.start_time IS NULL OR c.event_time > m.start_time)
+    GROUP BY c.player_id
 ),
 weapon_totals AS (
     SELECT playerId AS player_id, SUM(shots) AS shots, SUM(hits) AS hits
