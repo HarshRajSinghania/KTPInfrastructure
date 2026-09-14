@@ -11,6 +11,7 @@ meaning is not obvious from their names.
 |---|---|---|
 | `analytics-report-dto-v1.0.0` | 7-9 | Box score, trades, multikills, recap speed, ratings, lane analytics, spatial layers |
 | `analytics-report-dto-v1.1.0` | 10 | Adds `in_game_result`, `player_halves`, `lane_analytics.depth_profiles.units`; always carries `ratings.ktpr_v2.display_scale` |
+| `analytics-report-dto-v1.2.0` | 11 | Adds `kill_streaks`, `weapon_sides`, `duels_by_side`, `player_classes`, `players[].best_streak`, `player_halves.rows[].side` and `.best_streak`; cap breaks in `player_halves` take the producer half |
 
 Minor versions only add keys. A consumer that matches the
 `analytics-report-dto-v1.` prefix keeps working; one that needs the new blocks
@@ -80,8 +81,98 @@ half set in `ktp_matches`. It is read from the observer's settled
 | `rows[]` | `name`, `team` (match team number, as above), `half`, `duration_seconds`, and the box-score columns for that half |
 
 A player with no events and no position samples in a half has no row for it.
-Assists and cap breaks have no half column at the source and are placed by
-event time. Damage columns are `null` for legacy matches without per-hit damage.
+Assists have no half column at the source and are placed by event time; cap
+breaks use their producer half when the archive has one, else event time.
+Damage columns are `null` for legacy matches without per-hit damage.
+
+From v1.2.0 each row also carries:
+
+| Key | Meaning |
+|---|---|
+| `side` | `Allies` / `Axis`: the side the player held that half, from the life ledger. `null` when the ledger has no row for the player in that half, or shows two sides |
+| `best_streak` | That half's `kill_streaks` value, `null` when unavailable |
+
+A player's side is constant within a half, so any `player_halves` column split
+by `side` is a per-side split.
+
+## Reports built before schema 11
+
+`kill_streaks`, `weapon_sides`, `duels_by_side` and `player_classes` read
+`status: unavailable` with flag `not-in-report`, and `players[].best_streak` is
+`null`. Render them as unavailable, never as zero. Matches before the life
+ledger existed (all of S9) build at schema 11 with `status: unavailable` and a
+source flag.
+
+## `kill_streaks`
+
+`definition: kill_streak_v1`. A kill streak is the number of enemy kills a
+player makes between two of their own life ends within one half.
+
+- Counts frags (enemy kills). Teamkills never count.
+- Resets on every end of the player's life: death to an enemy or a teammate,
+  suicide, world death, disconnect. A teamkill BY the player does not reset,
+  and a respawn without a recorded death does not reset.
+- A half always resets. The match value is the best half.
+- A kill landing after the killer's own death (a grenade) counts toward the
+  counter as it stands then, which the death has already reset.
+- A kill and the killer's own death on the same tick: the kill is first.
+
+| Key | Meaning |
+|---|---|
+| `status`, `flags` | `available` / `unavailable`. Flags: `source-not-captured`, `no-life-boundaries`, `no-frag-clock`, `not-in-report` (unavailable); `unordered-frags`, `kills-without-life-boundaries` (available) |
+| `coverage` | `ordered_frags` (producer clock), `recovered_frags` (time taken from the victim's death within 2 s), `unordered_frags` (left out of runs), `kills_after_own_death` |
+| `rows[]` | Per player per half: `name`, `team`, `half`, `side`, `kills` (all frags, unordered included), `best_streak`, `streaks_3_plus` (runs of 3 or more), `lower_bound` |
+| `players[]` | Per player: `name`, `team`, `best_streak` (match), `by_side` (`Allies` / `Axis` best, `null` if not played), `lower_bound` |
+
+`lower_bound: true` means a frag of that player's could not be placed in time,
+so the published streak may be understated by it. `best_streak` is `null` only
+when the player has kills but no life boundary at all in that half.
+
+## `weapon_sides`
+
+Kills, headshot kills, shots, hits and opponent damage per player per half per
+weapon, filed under the side the PLAYER held that half, never the weapon's
+faction: a picked-up enemy weapon stays on the player's side.
+
+| Key | Meaning |
+|---|---|
+| `status`, `flags` | as above |
+| `reconciled` | `true` when the rows sum back to `weapons[]` for every column |
+| `mismatched_columns` | Columns that did not |
+| `unsided_kills` | Kills in rows whose `side` is `null` |
+| `rows[]` | `name`, `team`, `half`, `side`, `weapon`, `kills`, `headshot_kills`, `shots`, `hits`, `damage_dealt` (`null` for legacy damage) |
+
+## `duels_by_side`
+
+`duels[]` split by the side the killer held. Cross-team cells only, as in
+`duels[]`, so the `kills` of cells with the same `killer` and `victim` sum to
+that pair's `duels[]` value.
+
+| Key | Meaning |
+|---|---|
+| `reconciled` | `true` when the split sums back to the duel matrix |
+| `unsided_kills` | Kills filed under `killer_side: null` |
+| `cells[]` | `killer`, `victim`, `killer_side`, `kills` |
+
+## `player_classes`
+
+One row per player per half per class id, from the class read at spawn.
+
+| Key | Meaning |
+|---|---|
+| `rows[]` | `name`, `team`, `half`, `side`, `class_id`, `class_code`, `class_name` (`null` when the id is not in the mapping), `lives`, `kills`, `deaths`, `headshot_kills` |
+| `coverage` | `lives`, `lives_mapped`, `kills_classed` / `kills_unclassed`, `deaths_classed` / `deaths_unclassed`, `unmapped_class_ids` |
+
+- `lives`: consecutive spawns with no death between them are one life, owned by
+  the later spawn's class (the go-live baseline followed by the real spawn, or
+  a class-change respawn).
+- `kills` and `deaths` use the player's class at their latest spawn at or
+  before the frag, so a grenade landing after its thrower died counts to the
+  class that threw it. A frag with no time is `unclassed`.
+- A class row's kills include picked-up weapons; `weapon_sides` is where
+  weapons live.
+- No accuracy per class: shots carry no class or time at the source.
+- Class ids and labels: `config/analytics/dod_classes.toml`.
 
 ## `ratings.ktpr_v2.display_scale`
 

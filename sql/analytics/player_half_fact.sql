@@ -1,9 +1,11 @@
 -- One row per (match_id, player_id, half) for every closed half, carrying the
 -- additive box-score columns of player_match_fact.sql split by half. Read only.
 -- {{MATCH_ID}} is replaced with one safely quoted SQL literal by
--- scripts/match_analytics.py. Assists and cap breaks have no half column, so
--- they are placed by eventTime: a row belongs to the latest half that had
--- started by then (events carry a match_id only while a half is live).
+-- scripts/match_analytics.py. Assists have no half column, so they are placed
+-- by eventTime: a row belongs to the latest half that had started by then
+-- (events carry a match_id only while a half is live). Cap breaks take their
+-- producer half where the archive carries one (the BREAK_HALF token), else the
+-- same eventTime placement.
 WITH
 halves AS (
     SELECT half, start_time, end_time,
@@ -52,7 +54,7 @@ assists AS (
 ),
 breaks AS (
     SELECT e.playerId AS player_id,
-           (SELECT MAX(h.half) FROM halves h WHERE h.start_time <= e.eventTime) AS half,
+           {{BREAK_HALF}} AS half,
            COUNT(*) AS cap_breaks
     FROM hlstats_Events_PlayerActions e
     JOIN hlstats_Actions a ON a.id = e.actionId
