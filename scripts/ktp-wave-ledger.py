@@ -47,13 +47,27 @@ Usage:
   ktp-wave-ledger.py status                     # what is pending, and what is due
   ktp-wave-ledger.py check                      # CLAUDE.md only; no fleet, no network
   ktp-wave-ledger.py reconcile                  # read the fleet, then gate on CLAUDE.md
+  ktp-wave-ledger.py sweep [--no-ledger]        # the same whole-fleet read, marks nothing (timer)
   ktp-wave-ledger.py record -a NAME=MD5:REMOTE_DIR [-a ...] --hosts a,b --targets 24 \
                             --base NAME=owner/repo@sha
 
-Exit codes (`check` / `reconcile`):
+The unit of reconciliation is the RESTART. The 03:00 swap activates every staged
+`.new`, including ones no wave recorded: the 2026-09-08 swap activated
+stats_logging and ktp_cvar 7.38 while the ledger held stats_logging alone, and a
+2026-09-10 ktp_cvar stage never entered the ledger. So `reconcile` and `sweep`
+read every pinned artifact and every staged `.new` on every instance, and a wave
+is marked reconciled only when the whole fleet agrees with CLAUDE.md:
+
+  UNLEDGERED_LIVE    live md5 its row does not carry, and no wave staged it
+  LIVE_NOT_ON_ROW    live md5 its row does not carry (a wave staged it, or no ledger read)
+  ROW_NOT_LIVE       the row's first md5 -- the build it says is live -- is on no instance
+  NOT_UNIFORM        instances disagree: a partial activation
+  STAGED_UNLEDGERED  a `.new` in no pending wave, which the next swap activates regardless
+
+Exit codes (`check` / `reconcile` / `sweep`):
   0  nothing due, or every due wave's rows agree with the fleet
-  1  a row is STALE -- the fleet moved and CLAUDE.md did not
-  2  could not check (CLAUDE.md unreadable, fleet unreachable). Never a pass.
+  1  a row is STALE -- the fleet moved and CLAUDE.md did not -- or a finding above
+  2  could not check (CLAUDE.md unreadable, fleet unreachable, no ledger). Never a pass.
 """
 
 from __future__ import annotations
@@ -86,7 +100,7 @@ COMPONENT_BY_BASENAME = {
     "KTPMatchHandler.amxx": "KTPMatchHandler",
     "KTPPracticeMode.amxx": "KTPPracticeMode",
     "ktp_cvar.amxx": "KTPCvarChecker",
-    "KTPFileChecker.amxx": "KTPFileChecker",
+    "ktp_file.amxx": "KTPFileChecker",
     "KTPAdminAudit.amxx": "KTPAdminAudit",
     "KTPHLTVRecorder.amxx": "KTPHLTVRecorder",
     "KTPHudObserver.amxx": "KTPHudObserver",
@@ -95,7 +109,15 @@ COMPONENT_BY_BASENAME = {
     "KTPScoreTracker.amxx": "KTPScoreTracker",
 }
 
+# Tried before the component name: the table splits KTPAMXX into one row per artifact.
+ROW_ALIASES = {
+    "ktpamx_i386.so": ("KTPAMXX core",),
+    "dodx_ktp_i386.so": ("KTPAMXX dodx",),
+    "stats_logging.amxx": ("stats_logging.amxx",),
+}
+
 MD5_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+MD5_IN_TEXT_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])", re.IGNORECASE)
 
 # A build base: `<sha>`, optionally repo-qualified as `owner/repo@<sha>`, with a
 # `-dirty` suffix when the tree it was built in was not clean. The repo half is
@@ -193,14 +215,35 @@ def component_rows(text: str, component: str) -> list[str]:
     return out
 
 
+def rows_for(text: str, basename: str) -> tuple[str | None, list[str]]:
+    """(row name, lines) for the most specific version-table row naming this artifact."""
+    component = COMPONENT_BY_BASENAME.get(basename)
+    if not component:
+        return None, []
+    for name in ROW_ALIASES.get(basename, ()) + (component,):
+        rows = component_rows(text, name)
+        if rows:
+            return name, rows
+    return component, []
+
+
+def row_claim(text: str, basename: str) -> str | None:
+    """The first md5 after a row's first cell: by the table's convention, the build it says is live."""
+    _name, rows = rows_for(text, basename)
+    for r in rows:
+        m = MD5_IN_TEXT_RE.search(r.strip().strip("|").split("|", 1)[1])
+        if m:
+            return m.group(0).lower()
+    return None
+
+
 def check_row(text: str, basename: str, md5: str, version: str | None = None) -> RowFinding:
     """Does CLAUDE.md carry `md5` for `basename`'s component?"""
     md5 = md5.lower()
-    component = COMPONENT_BY_BASENAME.get(basename)
+    component, rows = rows_for(text, basename)
     says = f" (should read {version})" if version else ""
 
     if component:
-        rows = component_rows(text, component)
         if rows:
             if any(md5 in r.lower() for r in rows):
                 return RowFinding(basename, md5, component, True, "row",
@@ -403,42 +446,222 @@ def format_block(result: GateResult, claude_md: str | None = None) -> list[str]:
 # --------------------------------------------------------------------------
 # Fleet read (the strong check) -- md5sum only, never a write
 # --------------------------------------------------------------------------
+#
+# The swap activates every `.new` it finds, whoever staged it, so the read covers
+# the whole fleet rather than the artifacts one wave happened to name.
 
-def fleet_md5s(entry: dict) -> dict[str, dict[str, str | None]]:
-    """{basename: {"host:port": md5-or-None}} for this wave's target instances."""
+SWAP_DIRS = (
+    "serverfiles",
+    "serverfiles/dod/addons/ktpamx/dlls",
+    "serverfiles/dod/addons/ktpamx/modules",
+    "serverfiles/dod/addons/ktpamx/plugins",
+)
+
+_DONE = "__KTP_SWEEP_DONE__"
+
+
+@dataclass
+class FleetRead:
+    live: dict[str, dict[str, str | None]] = field(default_factory=dict)   # basename -> {inst: md5|None}
+    staged: dict[str, dict[str, str]] = field(default_factory=dict)        # basename -> {inst: md5 of .new}
+    errors: dict[str, str] = field(default_factory=dict)                   # host or inst -> why unread
+
+
+def _load_d2f():
     import importlib.util
-
-    import paramiko
 
     here = os.path.dirname(os.path.abspath(__file__))
     spec = importlib.util.spec_from_file_location("deploy_to_fleet",
                                                   os.path.join(here, "deploy-to-fleet.py"))
     d2f = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("deploy_to_fleet", d2f)
     spec.loader.exec_module(d2f)
+    return d2f
 
-    out: dict[str, dict[str, str | None]] = {a["basename"]: {} for a in entry["artifacts"]}
-    for hk in entry["hosts"]:
+
+def sweep_basenames(waves: list[tuple[str, dict]]) -> dict[str, str]:
+    """{basename: remote_dir} -- every mapped artifact, plus anything a wave ever staged."""
+    route = {"engine_i486.so": "serverfiles", "ktpamx_i386.so": SWAP_DIRS[1]}
+    out = {}
+    for b in COMPONENT_BY_BASENAME:
+        out[b] = route.get(b) or (SWAP_DIRS[2] if b.endswith(".so") else SWAP_DIRS[3])
+    for _p, e in waves:
+        for a in e.get("artifacts", []):
+            if a.get("remote_dir"):
+                out.setdefault(a["basename"], a["remote_dir"])
+    return out
+
+
+def host_command(ports: list[int], basenames: dict[str, str], user: str = "dodserver") -> str:
+    """One shell line per host: md5 every pinned file and every staged .new, per instance."""
+    files = " ".join(f"{d}/{b}" for b, d in sorted(basenames.items()))
+    news = " ".join(f"{d}/*.new" for d in SWAP_DIRS)
+    parts = []
+    for p in ports:
+        parts.append(f"echo '@@ {p}'; ( cd /home/{user}/dod-{p} 2>/dev/null || {{ echo '@@NODIR'; exit 0; }}; "
+                     f"nice -n 19 md5sum {files} 2>/dev/null; nice -n 19 md5sum {news} 2>/dev/null; true )")
+    parts.append(f"echo {_DONE}")
+    return "; ".join(parts)
+
+
+def parse_host_output(hk: str, ports: list[int], text: str, basenames: dict[str, str],
+                      read: FleetRead) -> None:
+    """Fold one host's output into `read`. A section that read nothing is an error, never 'all absent'."""
+    if _DONE not in text:
+        read.errors[hk] = "output truncated (no completion marker) -- not treated as absent"
+        return
+    sections: dict[int, list[str]] = {}
+    cur = None
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if ln.startswith("@@ "):
+            try:
+                cur = int(ln[3:])
+            except ValueError:
+                cur = None
+            if cur is not None:
+                sections[cur] = []
+        elif cur is not None and ln and ln != _DONE:
+            sections[cur].append(ln)
+    for p in ports:
+        inst = f"{hk}:{p}"
+        lines = sections.get(p)
+        if lines is None:
+            read.errors[inst] = "no output section"
+            continue
+        if "@@NODIR" in lines:
+            read.errors[inst] = f"instance directory dod-{p} missing"
+            continue
+        got_live = False
+        seen: dict[str, str] = {}
+        for ln in lines:
+            parts = ln.split(None, 1)
+            if len(parts) != 2 or not MD5_RE.match(parts[0]):
+                continue
+            base = os.path.basename(parts[1].strip())
+            if base.endswith(".new"):
+                read.staged.setdefault(base[:-4], {})[inst] = parts[0].lower()
+            else:
+                seen[base] = parts[0].lower()
+                got_live = True
+        if not got_live:
+            read.errors[inst] = "md5sum returned nothing -- not treated as absent"
+            continue
+        for b in basenames:
+            read.live.setdefault(b, {})[inst] = seen.get(b)
+
+
+def fleet_read(basenames: dict[str, str], hosts: list[str] | None = None) -> FleetRead:
+    """Read every pinned artifact and staged .new on every active instance. md5sum only."""
+    import paramiko
+
+    d2f = _load_d2f()
+    read = FleetRead()
+    for hk in hosts or list(d2f.SERVERS):
         info = d2f.SERVERS[hk]
+        ports = list(info.get("ports", d2f.PORTS))
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(info["host"], username=info["user"],
-                    password=d2f._fleet_ssh_password(), timeout=30)
         try:
-            for port in d2f.SERVERS[hk].get("ports", d2f.PORTS):
-                paths = {a["basename"]: f"/home/{info['user']}/dod-{port}/{a['remote_dir']}/{a['basename']}"
-                         for a in entry["artifacts"]}
-                cmd = "md5sum " + " ".join(f"'{p}'" for p in paths.values()) + " 2>/dev/null"
-                _, so, _ = ssh.exec_command(cmd, timeout=60)
-                seen = {}
-                for ln in so.read().decode().splitlines():
-                    parts = ln.split()
-                    if len(parts) == 2:
-                        seen[os.path.basename(parts[1])] = parts[0].lower()
-                for base in paths:
-                    out[base][f"{hk}:{port}"] = seen.get(base)
+            ssh.connect(info["host"], username=info["user"],
+                        password=d2f._fleet_ssh_password(), timeout=30)
+            _, so, _ = ssh.exec_command(host_command(ports, basenames, info["user"]), timeout=120)
+            parse_host_output(hk, ports, so.read().decode(errors="replace"), basenames, read)
+        except Exception as ex:
+            read.errors[hk] = f"{type(ex).__name__}: {ex}"
         finally:
             ssh.close()
+    return read
+
+
+# --------------------------------------------------------------------------
+# The restart reconcile: the whole fleet against CLAUDE.md and the ledger
+# --------------------------------------------------------------------------
+
+@dataclass
+class SweepFinding:
+    kind: str          # UNLEDGERED_LIVE | LIVE_NOT_ON_ROW | ROW_NOT_LIVE | NOT_UNIFORM | STAGED_UNLEDGERED
+    basename: str
+    md5: str | None
+    instances: list[str]
+    detail: str
+
+
+def _short(insts: list[str], total: int) -> str:
+    return f"{len(insts)}/{total}" + (f" ({', '.join(sorted(insts))})" if len(insts) <= 4 else "")
+
+
+def sweep(read: FleetRead, text: str, waves: list[tuple[str, dict]] | None) -> list[SweepFinding]:
+    """Everything the fleet runs or has staged that CLAUDE.md or the ledger cannot account for.
+
+    `waves` is every recorded wave, reconciled or not; None means no ledger was read,
+    and then provenance is reported as unknown rather than as absent.
+    """
+    ledgered = set()
+    pending = set()
+    for _p, e in waves or []:
+        for a in e.get("artifacts", []):
+            ledgered.add((a["basename"], a["md5"].lower()))
+            if not e.get("reconciled_at"):
+                pending.add((a["basename"], a["md5"].lower()))
+
+    out: list[SweepFinding] = []
+    for base in sorted(read.live):
+        seen = read.live[base]
+        by_md5: dict[str, list[str]] = {}
+        for inst, md5 in seen.items():
+            by_md5.setdefault(md5 or "ABSENT", []).append(inst)
+        present = {m: i for m, i in by_md5.items() if m != "ABSENT"}
+        if not present and base not in COMPONENT_BY_BASENAME:
+            continue
+        total = len(seen)
+
+        if present and len(by_md5) > 1:
+            spread = "; ".join(f"{m} on {_short(i, total)}" for m, i in sorted(by_md5.items()))
+            out.append(SweepFinding("NOT_UNIFORM", base, None, sorted(seen), f"partial activation: {spread}"))
+
+        for md5, insts in sorted(present.items()):
+            f = check_row(text, base, md5)
+            if f.ok:
+                continue
+            if waves is None:
+                kind, why = "LIVE_NOT_ON_ROW", "ledger not read, so provenance unknown"
+            elif (base, md5) in ledgered:
+                kind, why = "LIVE_NOT_ON_ROW", "a recorded wave staged it; flip the row"
+            else:
+                kind, why = "UNLEDGERED_LIVE", "no wave in the ledger staged it -- it reached the fleet outside stage-wave.py"
+            out.append(SweepFinding(kind, base, md5, insts,
+                                    f"live on {_short(insts, total)}; {f.detail} ({why})"))
+
+        claim = row_claim(text, base)
+        if claim and claim not in present:
+            out.append(SweepFinding("ROW_NOT_LIVE", base, claim, [],
+                                    f"the row's live md5 {claim} is on no instance "
+                                    f"(fleet: {', '.join(sorted(by_md5)) or 'nothing read'})"))
+
+    if waves is not None:
+        for base in sorted(read.staged):
+            by_md5 = {}
+            for inst, md5 in read.staged[base].items():
+                by_md5.setdefault(md5, []).append(inst)
+            for md5, insts in sorted(by_md5.items()):
+                if (base, md5) not in pending:
+                    out.append(SweepFinding("STAGED_UNLEDGERED", base, md5, insts,
+                                            f"{base}.new staged on {len(insts)} instance(s) and in no pending "
+                                            "wave -- the next 03:00 swap activates it with nothing to reconcile"))
     return out
+
+
+def format_sweep(read: FleetRead, findings: list[SweepFinding], ledger_note: str) -> list[str]:
+    insts = {i for seen in read.live.values() for i in seen}
+    staged = sum(len(v) for v in read.staged.values())
+    lines = [f"Fleet: {len(insts)} instance(s) read, {len(read.live)} pinned artifact(s), "
+             f"{staged} staged .new file(s). Ledger: {ledger_note}."]
+    for f in findings:
+        lines.append(f"  {f.kind}: {f.basename}" + (f" {f.md5}" if f.md5 else "") + f" -- {f.detail}")
+    if not findings:
+        lines.append("  clean: every live pinned md5 is on its CLAUDE.md row, and every staged .new is in a pending wave.")
+    return lines
 
 
 # --------------------------------------------------------------------------
@@ -480,11 +703,19 @@ def _cmd_check(args) -> int:
     return 0
 
 
+def _print_read_errors(read: FleetRead) -> None:
+    print("FATAL: could not read the whole fleet:", file=sys.stderr)
+    for k, v in sorted(read.errors.items()):
+        print(f"  {k}: {v}", file=sys.stderr)
+    print("Aborting -- an unverifiable gate is not a passed gate.", file=sys.stderr)
+
+
 def _cmd_reconcile(args) -> int:
     now = time.time()
     waves = [(p, e) for p, e in load_waves() if e["activates_after"] <= now]
-    if not waves:
-        print("Nothing to reconcile: no activated wave is awaiting a row flip.")
+    if not waves and args.no_fleet:
+        print("Nothing to reconcile: no activated wave is awaiting a row flip. "
+              "(--no-fleet: the fleet was NOT swept, so a stage that skipped the ledger is invisible here.)")
         return 0
 
     got = read_claude_md(args.claude_md)
@@ -494,26 +725,35 @@ def _cmd_reconcile(args) -> int:
         return 2
     path, text = got
 
+    read: FleetRead | None = None
+    if not args.no_fleet:
+        read = fleet_read(sweep_basenames(load_waves(include_reconciled=True)))
+        if read.errors:
+            _print_read_errors(read)
+            print("(--no-fleet checks CLAUDE.md alone, and says so.)", file=sys.stderr)
+            return 2
+    if not waves:
+        print("No activated wave is awaiting a row flip -- sweeping the fleet anyway, because a "
+              "stage that skipped the ledger leaves no wave behind.")
+
     rc = 0
+    ready = []
     for p, entry in waves:
         print(f"\nwave {entry['wave_id']} ({entry['targets']} instance(s)):")
         live: dict[str, dict[str, str | None]] = {}
-        if not args.no_fleet:
-            try:
-                live = fleet_md5s(entry)
-            except Exception as ex:
-                print(f"  FATAL: could not read the fleet: {ex!r}", file=sys.stderr)
-                print("  Aborting -- an unverifiable gate is not a passed gate. "
-                      "(--no-fleet checks CLAUDE.md alone, and says so.)", file=sys.stderr)
-                return 2
+        if read is not None:
+            hosts = set(entry["hosts"])
+            live = {a["basename"]: {i: m for i, m in read.live.get(a["basename"], {}).items()
+                                    if i.split(":", 1)[0] in hosts}
+                    for a in entry["artifacts"]}
 
         stale, unactivated = [], []
         for a in entry["artifacts"]:
             want = a["md5"]
-            if live:
+            if read is not None:
                 seen = live[a["basename"]]
                 matched = [k for k, v in seen.items() if v == want]
-                if len(matched) != len(seen):
+                if not seen or len(matched) != len(seen):
                     others = sorted({v or "ABSENT" for v in seen.values()} - {want})
                     print(f"  {a['basename']}: NOT activated -- {len(matched)}/{len(seen)} on {want}"
                           f" (also: {', '.join(others)})")
@@ -536,14 +776,59 @@ def _cmd_reconcile(args) -> int:
         elif unactivated:
             print(f"  left open: {', '.join(unactivated)} has not activated on every target yet.")
         else:
-            mark_reconciled(p, entry, "reconcile" if live else "reconcile --no-fleet")
-            print("  reconciled.")
+            ready.append((p, entry))
+
+    blocking: list[SweepFinding] = []
+    if read is not None:
+        findings = sweep(read, text, load_waves(include_reconciled=True))
+        print("\nrestart (the whole fleet, not only the waves above):")
+        for ln in format_sweep(read, findings, "read"):
+            print(f"  {ln}")
+        if findings:
+            rc = 1
+        blocking = [f for f in findings if f.kind != "STAGED_UNLEDGERED"]
+
+    for p, entry in ready:
+        if blocking:
+            print(f"  left open: wave {entry['wave_id']} -- the restart moved more than the ledger "
+                  "accounts for, so it is not reconciled until the whole fleet agrees.")
+        else:
+            mark_reconciled(p, entry, "reconcile" if read is not None else "reconcile --no-fleet")
+            print(f"  wave {entry['wave_id']} reconciled.")
 
     if rc:
         print(f"\nFAILED: CLAUDE.md ({path}) disagrees with what the fleet is running.",
               file=sys.stderr)
         print("The fleet md5 is the truth. Flip the row, then re-run.", file=sys.stderr)
     return rc
+
+
+def _cmd_sweep(args) -> int:
+    got = read_claude_md(args.claude_md)
+    if got is None:
+        print(f"FATAL: cannot read CLAUDE.md at {args.claude_md or default_claude_md()} -- "
+              "set $KTP_CLAUDE_MD. Not a pass.", file=sys.stderr)
+        return 2
+    _path, text = got
+
+    if args.no_ledger:
+        waves, note = None, "NOT read (--no-ledger), so provenance and staged .new are unchecked"
+    elif not os.path.isdir(ledger_dir()):
+        print(f"FATAL: no wave ledger at {ledger_dir()} -- set $KTP_WAVE_LEDGER_DIR, or pass "
+              "--no-ledger to sweep against CLAUDE.md alone.", file=sys.stderr)
+        return 2
+    else:
+        waves = load_waves(include_reconciled=True)
+        note = f"{len(waves)} wave(s) at {ledger_dir()}"
+
+    read = fleet_read(sweep_basenames(waves or []))
+    if read.errors:
+        _print_read_errors(read)
+        return 2
+    findings = sweep(read, text, waves)
+    for ln in format_sweep(read, findings, note):
+        print(ln)
+    return 1 if findings else 0
 
 
 def _cmd_record(args) -> int:
@@ -592,6 +877,13 @@ def main(argv=None) -> int:
                    help="Skip the fleet read and check CLAUDE.md against the recorded md5 only. "
                         "Weaker, and the output says so.")
     r.set_defaults(func=_cmd_reconcile)
+
+    sw = sub.add_parser("sweep", help="Read-only restart reconcile for a timer: the whole fleet "
+                                      "against CLAUDE.md and the ledger. Marks nothing.")
+    sw.add_argument("--no-ledger", action="store_true",
+                    help="Sweep against CLAUDE.md alone where no ledger exists. Provenance and staged "
+                         ".new are then unchecked, and the output says so.")
+    sw.set_defaults(func=_cmd_sweep)
 
     w = sub.add_parser("record", help="Record a wave by hand (stage-wave.py does this for you).")
     w.add_argument("-a", "--artifact", action="append", required=True, metavar="NAME=MD5[:REMOTE_DIR]")

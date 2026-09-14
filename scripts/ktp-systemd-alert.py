@@ -15,6 +15,10 @@ Companion to ktp-data-server-health.sh:
 Both can fire for the same incident (cascading failure) — that's a feature,
 not a bug; multiple signals confirm the failure shape.
 
+Every capture is also appended to /var/log/ktp-systemd-alert.log before the
+POST is attempted. For a unit whose stdout IS its report, the journal is not a
+trace of the finding, it is the only copy — and journald here holds ~2 days.
+
 The alert script itself MUST NOT depend on any of the units it monitors.
 Only stdlib + /etc/ktp/discord-relay.conf + journalctl + systemctl.
 
@@ -45,6 +49,20 @@ DEFAULT_ALERT_CHANNEL = "1498813261263405097"  # #ktp-updates
 # that makes the whole alerting layer worthless.
 COOLDOWN_STATE = "/var/lib/ktp/systemd-alert-cooldown.json"
 DEFAULT_COOLDOWN_SEC = 900
+
+# Durable capture of every failure, written before the POST is attempted.
+# journald on this box holds ~2 days: a weekly unit's findings are gone long
+# before anyone reads them, and for units whose OUTPUT IS the report -- the
+# identity reconciler prints its CRITICAL lines and exits 1 -- rotation destroys
+# the finding itself, not just a trace of it. Discord is not an archive either:
+# an embed is unsearchable, the cooldown drops repeats, and a relay outage loses
+# the alert entirely.
+ALERT_LOG = "/var/log/ktp-systemd-alert.log"
+# The embed stays at 25 lines (Discord caps the description at 4096 chars). The
+# log takes more, because a run that reports many findings is exactly the run
+# whose tail must not be clipped.
+EMBED_TAIL_LINES = 25
+LOG_TAIL_LINES = 400
 
 
 def load_cooldown() -> dict:
@@ -112,7 +130,7 @@ def collect_unit_state(unit: str) -> dict:
     _, result, _ = sh(f"systemctl show {unit} --property=Result --value 2>/dev/null")
     state["result"] = result
     _, journal_tail, _ = sh(
-        f'journalctl -u {unit} --no-pager -n 25 --output=short 2>/dev/null'
+        f'journalctl -u {unit} --no-pager -n {LOG_TAIL_LINES} --output=short 2>/dev/null'
     )
     # Strip the per-line journal prefix (timestamp + host + unit) for readability;
     # keep just the message portion.
@@ -126,8 +144,39 @@ def collect_unit_state(unit: str) -> dict:
                 lines.append(f"{ts_host[0]} {ts_host[1]} {ts_host[2]}: {parts[1]}")
                 continue
         lines.append(line)
-    state["journal_tail"] = "\n".join(lines[-25:])
+    state["journal_tail"] = "\n".join(lines[-EMBED_TAIL_LINES:])
+    state["journal_full"] = "\n".join(lines)
     return state
+
+
+def append_alert_log(unit: str, state: dict, path: str = ALERT_LOG) -> None:
+    """Append the whole capture to a durable file.
+
+    Called before the cooldown check and before the POST, so a suppressed alert,
+    a relay outage and a rotated journal all still leave the findings on disk.
+    Never raises: losing the archive must not lose the alert.
+    """
+    stamp = datetime.now(timezone.utc).isoformat()
+    body = state.get("journal_full") or state.get("journal_tail") or ""
+    header = (
+        f"===== {stamp} {unit} "
+        f"result={state.get('result') or '?'} "
+        f"exit={state.get('exec_main_status') or '?'} "
+        f"sub={state.get('sub_state') or '?'} "
+        f"is-active={state.get('is_active') or '?'} "
+        f"restarts={state.get('n_restarts') or '?'} "
+        f"host={socket.gethostname()}"
+    )
+    try:
+        with open(path, "a") as fh:
+            fh.write(header + "\n")
+            if body:
+                fh.write(body + "\n")
+            else:
+                fh.write("(no journal output captured)\n")
+            fh.write("\n")
+    except OSError as ex:
+        print(f"WARN: alert log not written: {ex}", file=sys.stderr)
 
 
 def build_embed(unit: str, state: dict) -> dict:
@@ -188,6 +237,9 @@ def main() -> int:
     ap.add_argument("--cooldown", type=int, default=DEFAULT_COOLDOWN_SEC,
                     help=f"Per-unit seconds between posts; 0 disables "
                          f"(default: {DEFAULT_COOLDOWN_SEC})")
+    ap.add_argument("--alert-log", default=ALERT_LOG,
+                    help=f"Durable capture file, appended before the POST "
+                         f"(default: {ALERT_LOG})")
     args = ap.parse_args()
 
     state = collect_unit_state(args.unit)
@@ -196,6 +248,9 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(embed, indent=2))
         return 0
+
+    # First, and unconditionally: every path below can lose the capture.
+    append_alert_log(args.unit, state, args.alert_log)
 
     conf = load_relay_conf()
     relay_url = conf.get("RELAY_URL", "")

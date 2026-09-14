@@ -12,6 +12,8 @@ SELECT
       ELSE NULL
     END AS half,
     f.half AS stored_half,
+    f.match_id AS stored_match_id,
+    UNIX_TIMESTAMP(f.eventTime) AS receipt_epoch,
     f.producer_match_id,
     f.producer_half,
     f.game_time,

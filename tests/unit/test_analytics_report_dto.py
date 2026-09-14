@@ -433,6 +433,88 @@ class Sanitize(unittest.TestCase):
         ph = sanitize_report(internal_report())["player_halves"]
         self.assertEqual((ph["status"], ph["rows"]), ("unavailable", []))
 
+    def test_contract_is_v1_2_0(self):
+        self.assertEqual(CONTRACT_VERSION, "analytics-report-dto-v1.2.0")
+
+    def test_player_halves_carry_side_and_best_streak(self):
+        rep = internal_report()
+        rep["player_halves"] = {"status": "available", "reconciled": True,
+                                "mismatched_columns": [], "rows": [
+            {"player_id": 7, "player_name_at_match": "A", "team": 1, "half": 1,
+             "side": "Axis", "best_streak": 5, "kills": 9},
+            {"player_id": 7, "player_name_at_match": "A", "team": 1, "half": 2,
+             "side": "team2", "best_streak": None}]}
+        rows = sanitize_report(rep)["player_halves"]["rows"]
+        self.assertEqual([(r["side"], r["best_streak"]) for r in rows],
+                         [("Axis", 5), (None, None)])
+
+    def test_kill_streaks_whitelisted(self):
+        rep = internal_report()
+        rep["players"][0]["best_streak"] = 5
+        rep["kill_streaks"] = {
+            "definition": "kill_streak_v1", "definition_version": 1, "status": "available",
+            "flags": ["unordered-frags"],
+            "coverage": {"ordered_frags": 10, "recovered_frags": 1, "unordered_frags": 1,
+                         "kills_after_own_death": 2, "event_ids": [1]},
+            "rows": [{"player_id": 7, "steam_id": "0:123", "player_name_at_match": "SavageÂ¬",
+                      "team": 1, "half": 1, "side": "Allies", "kills": 9, "best_streak": 5,
+                      "streaks_3_plus": 2, "lower_bound": True}],
+            "players": [{"player_id": 7, "player_name_at_match": "A", "team": 1,
+                         "best_streak": 5, "by_side": {"Allies": 5, "Axis": None},
+                         "lower_bound": True}]}
+        dto = sanitize_report(rep)
+        ks = dto["kill_streaks"]
+        self.assertEqual(dto["players"][0]["best_streak"], 5)
+        self.assertEqual(ks["rows"][0], {"name": "Savage¬", "team": 1, "half": 1,
+                                         "side": "Allies", "kills": 9, "best_streak": 5,
+                                         "streaks_3_plus": 2, "lower_bound": True})
+        self.assertEqual(ks["players"][0]["by_side"], {"Allies": 5, "Axis": None})
+        self.assertNotIn("event_ids", ks["coverage"])
+        body = json.dumps(ks)
+        for bad in ("player_id", "steam_id", "0:123"):
+            self.assertNotIn(bad, body)
+
+    def test_side_splits_whitelisted(self):
+        rep = internal_report()
+        rep["weapon_sides"] = {"status": "available", "flags": [], "reconciled": True,
+                               "mismatched_columns": [], "unsided_kills": 0, "rows": [
+            {"player_id": 7, "player_name_at_match": "A", "team": 1, "half": 1,
+             "side": "Allies", "weapon": "kar", "kills": 3, "headshot_kills": 1,
+             "shots": 10, "hits": 4, "damage_dealt": None}]}
+        rep["duels_by_side"] = {"status": "available", "flags": [], "reconciled": True,
+                                "unsided_kills": 0, "cells": [
+            {"killer_id": 7, "killer_name": "A", "victim_id": 8, "victim_name": "B",
+             "killer_side": "Axis", "kills": 2, "cross_team": True},
+            {"killer_id": 7, "killer_name": "A", "victim_id": 9, "victim_name": "C",
+             "killer_side": "Axis", "kills": 1, "cross_team": False}]}
+        rep["player_classes"] = {"status": "available", "flags": [],
+                                 "coverage": {"lives": 4, "lives_mapped": 4,
+                                              "unmapped_class_ids": []},
+                                 "rows": [{"player_id": 7, "player_name_at_match": "A",
+                                           "team": 1, "half": 1, "side": "Axis",
+                                           "class_id": 10, "class_code": "kar98",
+                                           "class_name": "Grenadier", "lives": 4,
+                                           "kills": 3, "deaths": 3, "headshot_kills": 1}]}
+        dto = sanitize_report(rep)
+        self.assertEqual(dto["weapon_sides"]["rows"][0]["weapon"], "kar")
+        self.assertIsNone(dto["weapon_sides"]["rows"][0]["damage_dealt"])
+        self.assertEqual(dto["duels_by_side"]["cells"],
+                         [{"killer": "A", "victim": "B", "killer_side": "Axis", "kills": 2}])
+        row = dto["player_classes"]["rows"][0]
+        self.assertEqual((row["class_code"], row["lives"], row["side"]), ("kar98", 4, "Axis"))
+        body = json.dumps([dto["weapon_sides"], dto["duels_by_side"], dto["player_classes"]])
+        self.assertNotIn("player_id", body)
+        self.assertNotIn("killer_id", body)
+
+    def test_a_report_before_schema_11_reads_unavailable_not_zero(self):
+        dto = sanitize_report(internal_report())
+        for block, rows_key in (("kill_streaks", "rows"), ("weapon_sides", "rows"),
+                                ("duels_by_side", "cells"), ("player_classes", "rows")):
+            self.assertEqual((dto[block]["status"], dto[block]["flags"], dto[block][rows_key]),
+                             ("unavailable", ["not-in-report"], []), block)
+        self.assertIsNone(dto["players"][0]["best_streak"])
+        self.assertIsNone(dto["kill_streaks"]["coverage"]["ordered_frags"])
+
     def test_duels_cross_team_only(self):
         d = sanitize_report(internal_report())["duels"]
         self.assertEqual(d, [{"killer": "A", "victim": "B", "kills": 2}])

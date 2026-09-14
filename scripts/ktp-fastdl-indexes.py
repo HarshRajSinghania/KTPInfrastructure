@@ -13,9 +13,15 @@ Two very different trees:
 
 LAN-PHILLY2026 is skipped -- it has its own generator that knows the team names.
 
-Idempotent: only ever writes index.html. Usage: fastdl_indexes.py [--apply]
+The demo archive also gets /demos/players.html, a SteamID/name lookup joined from
+hlstatsx.ktp_match_players. It is the only part that touches a database, so it is the only
+part allowed to be missing: if the read fails the page is removed and everything else is
+written exactly as before.
+
+Idempotent: only ever writes index.html and players.html (and removes players.html when
+the lookup cannot be built). Usage: fastdl_indexes.py [--apply] [--out-root DIR]
 """
-import argparse, collections, html, json, os, re, time
+import argparse, collections, html, json, os, re, subprocess, time
 
 FASTDL = "/var/www/fastdl"
 DEMOS = "/home/hltvserver/hlds/dod/demos"
@@ -29,6 +35,19 @@ SKIP = {"LAN-PHILLY2026"}
 CITY = {"ATL": "Atlanta", "DAL": "Dallas", "DEN": "Denver", "NY": "New York", "CHI": "Chicago"}
 TYPE_LABEL = {"ktp": "League (.ktp)", "scrim": "Scrims", "draft": "Drafts", "12man": "12-man"}
 RETENTION = {"ktp": "180 days", "draft": "180 days", "12man": "90 days", "scrim": "90 days"}
+
+# MATCH_ID_RE from match_analytics minus -TEST: placeholders like 1.3-confirm-NY2 recur across matches.
+MATCH_ID = r"(?:\d+|1\.3-\d+)-[A-Z]{2,5}\d+"
+MATCH_ID_RE = re.compile(MATCH_ID)
+# A second server token after the id is the HLTV that recorded it, not the match.
+DEMO_MATCH_RE = re.compile(r"[a-z0-9]+_(" + MATCH_ID + r")(?=[-_])")
+STEAM_ID_RE = re.compile(r"[01]:\d{1,10}")
+STEAM64_BASE = 76561197960265728
+PLAYER_QUERY = ("SELECT match_id, steam_id, HEX(player_name) FROM ktp_match_players"
+                " ORDER BY joined_at, id")
+PLAYER_LINK_SLOT = "<!--players-link-->"
+PLAYER_LINK = ('<p class="note"><a href="/demos/players.html">Find every demo a player appears in'
+               ' &rarr;</a></p>')
 
 CSS = """
 :root{--bg:#171c0a;--panel:#252a14;--inset:#101407;--border:#3d432b;
@@ -277,9 +296,159 @@ def card(inner, href, *extra, cls="card"):
             + '" href="' + html.escape(href) + '">' + inner + '</a>')
 
 
+def _no_players(reason):
+    print("WARNING: player index omitted: " + reason)
+    return None
+
+
+def load_match_players(timeout):
+    """{match_id: {steam_id: name}} from hlstatsx, or None when it cannot be trusted.
+
+    None on every failure -- no client, refused login, timeout, non-zero exit, no
+    usable row -- so the caller drops the lookup instead of failing the whole run.
+    Names are fetched as hex because --batch output is framed by tabs and newlines.
+    """
+    try:
+        import pwd
+        # auth_socket checks the OS user, and the client does not reliably send it unasked.
+        user = pwd.getpwuid(os.geteuid()).pw_name
+        proc = subprocess.run(
+            ["mysql", "--batch", "--skip-column-names", "--connect-timeout=5",
+             "--user=" + user, "-e", PLAYER_QUERY, "hlstatsx"],
+            stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
+            errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return _no_players("mysql did not answer within %gs" % timeout)
+    except (OSError, ImportError, KeyError) as e:
+        return _no_players("could not run mysql: %s" % e)
+    if proc.returncode != 0:
+        return _no_players("mysql exited %d: %s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    rosters, malformed = {}, 0
+    for line in proc.stdout.splitlines():
+        f = line.split("\t")
+        if len(f) != 3 or not STEAM_ID_RE.fullmatch(f[1]):
+            malformed += 1
+            continue
+        try:
+            name = bytes.fromhex(f[2]).decode("utf-8", "replace").strip()
+        except ValueError:
+            malformed += 1
+            continue
+        if MATCH_ID_RE.fullmatch(f[0]):
+            # rows arrive oldest first, so a later join in the same match wins the name
+            rosters.setdefault(f[0], {})[f[1]] = name or f[1]
+    if malformed:
+        print("player index: skipped %d malformed rows" % malformed)
+    if not rosters:
+        return _no_players("no usable rows in ktp_match_players")
+    return rosters
+
+
+def demo_match_key(fname):
+    m = DEMO_MATCH_RE.match(fname)
+    return m.group(1) if m else None
+
+
+def steam_spellings(sid):
+    """(STEAM_0 display, SteamID64, every spelling someone might paste) for a bare Y:Z id."""
+    y, z = sid.split(":")
+    s64 = str(STEAM64_BASE + int(z) * 2 + int(y))
+    return "STEAM_0:" + sid, s64, ["STEAM_0:" + sid, "STEAM_1:" + sid, sid, s64]
+
+
+PLAYER_JS = """<script>
+(function(){
+  var q=document.getElementById('pq'), box=document.getElementById('pr'),
+      cnt=document.getElementById('pqc'), raw=document.getElementById('pdata');
+  if(!q||!box||!raw) return;
+  var d=JSON.parse(raw.textContent), P=d.players, D=d.demos, CAP=50;
+  function card(p){
+    var chips=p[5].map(function(i){
+      var e=D[i];
+      return '<a class="f" href="'+e[0]+'"><span class="h">'+e[1]+'</span><span class="sz">'+e[2]+'</span></a>';
+    }).join('');
+    return '<div class="match"><div class="mh"><span class="teams">'+p[3]+'</span>'
+      +'<span class="meta"><a href="#'+p[1]+'">'+p[1]+'</a> &middot; '+p[2]+'</span></div>'
+      +(p[4]?'<div class="meta">also played as '+p[4]+'</div>':'')
+      +'<div class="meta">'+p[5].length+' demo'+(p[5].length===1?'':'s')+', newest first</div>'
+      +'<div class="files">'+chips+'</div></div>';
+  }
+  function draw(){
+    var terms=q.value.trim().toLowerCase().split(/\\s+/).filter(Boolean);
+    if(!terms.length){ box.innerHTML=''; cnt.textContent=P.length+' players'; return; }
+    var hits=P.filter(function(p){
+      return terms.every(function(w){ return p[0].indexOf(w)!==-1; });
+    });
+    cnt.textContent=hits.length+' of '+P.length+' players';
+    if(!hits.length){ box.innerHTML='<p class="note">No player matches that.</p>'; return; }
+    box.innerHTML=hits.slice(0,CAP).map(card).join('')
+      +(hits.length>CAP?'<p class="note">Showing the first '+CAP+' &mdash; narrow the search.</p>':'');
+  }
+  // #STEAM_0:1:234 is the permalink for one player's demos.
+  function fromHash(){
+    var h=''; try{ h=decodeURIComponent(location.hash.slice(1)); }catch(e){}
+    if(h) q.value=h;
+    draw();
+  }
+  q.addEventListener('input',draw);
+  window.addEventListener('hashchange',fromHash);
+  window.addEventListener('pageshow',fromHash);
+})();
+</script>"""
+
+
+def player_lookup_page(entries, rosters):
+    """players.html for the whole archive, or None when no demo joins a roster.
+
+    `entries` are the whole-archive index rows, newest first, each carrying its
+    match key; a player's first name seen is therefore the most recent one.
+    """
+    demos, people = [], collections.OrderedDict()
+    for e in entries:
+        roster = rosters.get(e[5]) if e[5] else None
+        if not roster:
+            continue
+        demos.append(e[1:4])
+        for sid, name in roster.items():
+            p = people.setdefault(sid, {"names": collections.OrderedDict(), "demos": []})
+            p["names"][name] = None
+            p["demos"].append(len(demos) - 1)
+    if not people:
+        return _no_players("no archived demo matched a player row")
+    rows = []
+    for sid, p in people.items():
+        shown, s64, spellings = steam_spellings(sid)
+        names = list(p["names"])
+        rows.append([" ".join(spellings + names).lower(), shown, s64, html.escape(names[0]),
+                     html.escape(", ".join(names[1:])), p["demos"]])
+    rows.sort(key=lambda r: (html.unescape(r[3]).lower(), r[1]))
+    body = ('<div class="crumb"><a href="/">fastdl</a> / <a href="/demos/">demos</a> / players</div>'
+            '<h1>Find a <span class="accent">player</span></h1>'
+            '<p class="lede">Search by name, SteamID or SteamID64 to list every archived demo a '
+            'player appears in. Names are the ones they played under.</p>'
+            '<div class="search"><input id="pq" type="search" autocomplete="off" spellcheck="false"'
+            ' placeholder="Name, STEAM_0:1:234 or 7656119&hellip;" aria-label="Find a player"'
+            ' aria-controls="pqc"><span id="pqc" class="qc" role="status" aria-live="polite"></span></div>'
+            '<p class="note">' + str(len(rows)) + ' players across ' + str(len(demos))
+            + ' demos. Only matches the stats pipeline recorded a roster for are listed; '
+            'the <a href="/demos/">full archive</a> has every demo.</p>'
+            '<div id="pr"></div>'
+            '<script id="pdata" type="application/json">'
+            + json.dumps({"players": rows, "demos": demos}, separators=(",", ":")).replace("</", "<\\/")
+            + '</script>')
+    return (page("KTP Demo Archive — players", "Demo Archive", body,
+                 "Every competitive match on the KTP fleet, recorded by HLTV, searchable by player.",
+                 extra_js=PLAYER_JS), len(rows), len(demos))
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--apply", action="store_true")
+ap.add_argument("--fastdl", default=FASTDL)
+ap.add_argument("--demos", default=DEMOS)
+ap.add_argument("--out-root", help="write pages under this directory instead of in place")
+ap.add_argument("--db-timeout", type=float, default=20.0)
 args = ap.parse_args()
+FASTDL, DEMOS = args.fastdl, args.demos
 out = []
 
 # ---------------------------------------------------------------- /dod
@@ -432,7 +601,7 @@ body = ('<div class="crumb"><a href="/">fastdl</a> / demos</div>'
         '<h1>Demo <span class="accent">archive</span></h1>'
         '<p class="lede">Every match HLTV records across the 24-server fleet, sorted by server and '
         'match type. <b>League and draft matches are kept 180 days; pickups and scrims 90.</b> '
-        'Download one before it ages out.</p>' + SEARCH
+        'Download one before it ages out.</p>' + PLAYER_LINK_SLOT + SEARCH
         + '<div id="gs" hidden></div>' + "".join(sections))
 demos_index_body = body          # written after the loop below, which fills GLOBAL_INDEX
 GLOBAL_INDEX = []                # [search key, href, title, meta] per demo file
@@ -488,6 +657,7 @@ for s in servers:
                     html.escape("%s — %s" % (s, mapname or mid)),
                     html.escape("%s · %s · %s" % (TYPE_LABEL.get(t, t), rec or "date unknown", lbl)),
                     rec_key(f),      # sort field only; stripped before embedding
+                    demo_match_key(f),   # player-lookup join key; also stripped
                 ])
             inner = ('<div class="mh"><span class="teams">'
                      + html.escape(when or mid) + '</span><span class="meta">'
@@ -514,9 +684,22 @@ for s in servers:
 # result list drops the oldest rather than an arbitrary slice.
 GLOBAL_INDEX.sort(key=lambda e: e[4], reverse=True)
 _gs = [e[:4] for e in GLOBAL_INDEX]
+
+PLAYERS_PAGE = DEMOS + "/players.html"
+player_page = None
+rosters = load_match_players(args.db_timeout)
+if rosters is not None:
+    try:
+        player_page = player_lookup_page(GLOBAL_INDEX, rosters)
+    except Exception as e:  # a render bug must cost the lookup, never the archive
+        player_page = _no_players("could not render: %r" % e)
+if player_page:
+    print("player index: %d players linked to %d demos" % player_page[1:])
+    out.append((PLAYERS_PAGE, player_page[0]))
+
 out.append((DEMOS + "/index.html",
             page("KTP Demo Archive", "Demo Archive",
-                 demos_index_body
+                 demos_index_body.replace(PLAYER_LINK_SLOT, PLAYER_LINK if player_page else "")
                  + '<script id="gsdata" type="application/json">'
                  + json.dumps(_gs, separators=(",", ":")).replace("</", "<\\/")
                  + '</script>',
@@ -566,11 +749,22 @@ for root, dirs, files in os.walk(FASTDL + "/dod"):
                 page("KTP FastDL — dod/" + rel, "Client Downloads", body,
                      "Fast content distribution for KTP game servers.")))
 
+def dest(p):
+    return os.path.join(args.out_root, p.lstrip("/")) if args.out_root else p
+
+
 print("index pages: %d" % len(out))
 if args.apply:
+    # An earlier run's roster must not outlive a read that failed.
+    if player_page is None and os.path.exists(dest(PLAYERS_PAGE)):
+        os.remove(dest(PLAYERS_PAGE))
+        print("removed " + dest(PLAYERS_PAGE))
     for p, b in out:
-        open(p, "w", encoding="utf-8", newline="\n").write(b)
-        os.chmod(p, 0o644)
+        d = dest(p)
+        if args.out_root:
+            os.makedirs(os.path.dirname(d), exist_ok=True)
+        open(d, "w", encoding="utf-8", newline="\n").write(b)
+        os.chmod(d, 0o644)
     print("written.")
 else:
     for p, _ in out[:6]:

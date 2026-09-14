@@ -1,0 +1,139 @@
+# Day of Defeat class ids as read at spawn into ktp_life_events.player_class.
+#
+# Ids follow KTPAMXX plugins/include/dodconst.inc (DODC_*). `role` is the
+# hlstatsx killerRole code for the same class, where one exists; the mapping
+# test pins every role-carrying id against measured killerRole counts.
+# `side` is the side that can pick the class (British classes play as Allies).
+
+[classes.1]
+code = "garand"
+name = "Rifleman"
+side = "Allies"
+role = "#class_allied_garand"
+
+[classes.2]
+code = "carbine"
+name = "Staff Sergeant"
+side = "Allies"
+role = "#class_allied_carbine"
+
+[classes.3]
+code = "thompson"
+name = "Master Sergeant"
+side = "Allies"
+role = "#class_allied_thompson"
+
+[classes.4]
+code = "greasegun"
+name = "Sergeant"
+side = "Allies"
+role = "#class_allied_grease"
+
+[classes.5]
+code = "spring"
+name = "Sniper"
+side = "Allies"
+role = "#class_allied_sniper"
+
+[classes.6]
+code = "bar"
+name = "Support Infantry"
+side = "Allies"
+role = "#class_allied_heavy"
+
+[classes.7]
+code = "30cal"
+name = "Machine Gunner"
+side = "Allies"
+role = "#class_allied_mg"
+
+[classes.8]
+code = "bazooka"
+name = "Bazooka"
+side = "Allies"
+
+[classes.10]
+code = "kar98"
+name = "Grenadier"
+side = "Axis"
+role = "#class_axis_kar98"
+
+[classes.11]
+code = "k43"
+name = "Stosstruppe"
+side = "Axis"
+role = "#class_axis_k43"
+
+[classes.12]
+code = "mp40"
+name = "Unteroffizier"
+side = "Axis"
+role = "#class_axis_mp40"
+
+[classes.13]
+code = "mp44"
+name = "Sturmtruppe"
+side = "Axis"
+role = "#class_axis_mp44"
+
+[classes.14]
+code = "scharfschutze"
+name = "Scharfschütze"
+side = "Axis"
+role = "#class_axis_sniper"
+
+[classes.15]
+code = "fg42"
+name = "FG42-Zweibein"
+side = "Axis"
+
+[classes.16]
+code = "scoped_fg42"
+name = "FG42-Zielfernrohr"
+side = "Axis"
+
+[classes.17]
+code = "mg34"
+name = "MG34-Schütze"
+side = "Axis"
+role = "#class_axis_mg34"
+
+[classes.18]
+code = "mg42"
+name = "MG42-Schütze"
+side = "Axis"
+role = "#class_axis_mg42"
+
+[classes.19]
+code = "panzerjager"
+name = "Panzerjäger"
+side = "Axis"
+
+[classes.21]
+code = "enfield"
+name = "Rifleman"
+side = "Allies"
+role = "#class_brit_light"
+
+[classes.22]
+code = "sten"
+name = "Sergeant Major"
+side = "Allies"
+role = "#class_brit_medium"
+
+[classes.23]
+code = "marksman"
+name = "Marksman"
+side = "Allies"
+role = "#class_brit_sniper"
+
+[classes.24]
+code = "bren"
+name = "Gunner"
+side = "Allies"
+role = "#class_brit_heavy"
+
+[classes.25]
+code = "piat"
+name = "PIAT"
+side = "Allies"
