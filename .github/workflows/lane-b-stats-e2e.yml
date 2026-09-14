@@ -527,6 +527,9 @@ jobs:
             test -f build/lane-b-artifacts/engine/engine_i486.so
             ENGINE_ARGS="--engine-so /work/build/engine/engine_i486.so --engine-provenance /work/build/engine/provenance.json"
           fi
+          # Written by the builder as paths under this same /work/build mount, holding only what the daemon ref carries.
+          mapfile -t schema_migrations < build/lane-b-artifacts/artifacts/schema-migrations.txt
+          test "${#schema_migrations[@]}" -gt 0
           docker run --rm --network none \
             -v "${PWD}/tests:/work/tests:ro" \
             -v "${PWD}/scripts:/work/scripts:ro" \
@@ -545,32 +548,7 @@ jobs:
               --config-dir /work/config/local \
               --hlstats /work/build/daemon/hlstats.pl \
               --schema /work/build/base-schema.sql \
-                       /work/build/artifacts/sql/migrate_005_frag_context_columns.sql \
-                       /work/build/artifacts/sql/migrate_006_damage_ledger.sql \
-                       /work/build/artifacts/sql/migrate_007_break_context.sql \
-                       /work/build/artifacts/sql/migrate_008_position_samples.sql \
-                       /work/build/artifacts/sql/migrate_009_disable_connect_announcements.sql \
-                       /work/build/artifacts/sql/migrate_010_flag_captures.sql \
-                       /work/build/artifacts/sql/migrate_011_match_player_identity_width.sql \
-                       /work/build/artifacts/sql/migrate_012_frag_context_correlation.sql \
-                       /work/build/artifacts/sql/migrate_013_ktp_table_collation.sql \
-                       /work/build/artifacts/sql/migrate_014_match_type_retention.sql \
-                       /work/build/artifacts/sql/migrate_015_flag_state_events.sql \
-                       /work/build/artifacts/sql/migrate_016_life_events.sql \
-                       /work/build/artifacts/sql/migrate_017_capture_clocks_and_assists.sql \
-                       /work/build/artifacts/sql/migrate_018_break_context_correlation.sql \
-                       /work/build/artifacts/sql/migrate_019_clear_uncertified_frag_context.sql \
-                       /work/build/artifacts/sql/migrate_020_frag_context_certified.sql \
-                       /work/build/artifacts/sql/migrate_021_capture_observability.sql \
-                       /work/build/artifacts/sql/migrate_022_objective_attempts_grenade_entities.sql \
-                       /work/build/artifacts/sql/migrate_023_headshot_observed_provenance.sql \
-                       /work/build/artifacts/sql/migrate_024_team_membership_intervals.sql \
-                       /work/build/artifacts/sql/migrate_025_position_state_map_revision.sql \
-                       /work/build/artifacts/sql/migrate_027_shot_events.sql \
-                       /work/build/artifacts/sql/migrate_028_shot_events_dedup.sql \
-                       /work/build/artifacts/sql/migrate_029_shot_target_state.sql \
-                       /work/build/artifacts/sql/migrate_030_shot_target_player.sql \
-                       /work/build/artifacts/sql/migrate_031_shot_shooter_stance.sql \
+                       "${schema_migrations[@]}" \
               --seed /work/build/artifacts/sql/migrate_003_assist_action.sql \
                      /work/build/artifacts/sql/migrate_004_cap_break_action.sql \
                      /work/tests/e2e_stats/fixtures/lane_b_standard_actions.sql \
@@ -623,6 +601,9 @@ jobs:
             > build/lane-b-artifacts/base-schema.sql
           test "$(grep -c '^INSERT' build/lane-b-artifacts/base-schema.sql || true)" -eq 0
           test "$(grep -c '^CREATE TABLE' build/lane-b-artifacts/base-schema.sql)" -gt 0
+          # Written by the builder as paths under this same /work/build mount, holding only what the daemon ref carries.
+          mapfile -t schema_migrations < build/lane-b-artifacts/artifacts/schema-migrations.txt
+          test "${#schema_migrations[@]}" -gt 0
           set +e
           docker run --rm \
             -v "${PWD}/tests:/work/tests:ro" \
@@ -634,32 +615,7 @@ jobs:
               --hlstats /work/build/daemon/hlstats.pl \
               --schema /work/build/base-schema.sql \
                        /work/build/artifacts/sql/ktp_schema.sql \
-                       /work/build/artifacts/sql/migrate_005_frag_context_columns.sql \
-                       /work/build/artifacts/sql/migrate_006_damage_ledger.sql \
-                       /work/build/artifacts/sql/migrate_007_break_context.sql \
-                       /work/build/artifacts/sql/migrate_008_position_samples.sql \
-                       /work/build/artifacts/sql/migrate_009_disable_connect_announcements.sql \
-                       /work/build/artifacts/sql/migrate_010_flag_captures.sql \
-                       /work/build/artifacts/sql/migrate_011_match_player_identity_width.sql \
-                       /work/build/artifacts/sql/migrate_012_frag_context_correlation.sql \
-                       /work/build/artifacts/sql/migrate_013_ktp_table_collation.sql \
-                       /work/build/artifacts/sql/migrate_014_match_type_retention.sql \
-                       /work/build/artifacts/sql/migrate_015_flag_state_events.sql \
-                       /work/build/artifacts/sql/migrate_016_life_events.sql \
-                       /work/build/artifacts/sql/migrate_017_capture_clocks_and_assists.sql \
-                       /work/build/artifacts/sql/migrate_018_break_context_correlation.sql \
-                       /work/build/artifacts/sql/migrate_019_clear_uncertified_frag_context.sql \
-                       /work/build/artifacts/sql/migrate_020_frag_context_certified.sql \
-                       /work/build/artifacts/sql/migrate_021_capture_observability.sql \
-                       /work/build/artifacts/sql/migrate_022_objective_attempts_grenade_entities.sql \
-                       /work/build/artifacts/sql/migrate_023_headshot_observed_provenance.sql \
-                       /work/build/artifacts/sql/migrate_024_team_membership_intervals.sql \
-                       /work/build/artifacts/sql/migrate_025_position_state_map_revision.sql \
-                       /work/build/artifacts/sql/migrate_027_shot_events.sql \
-                       /work/build/artifacts/sql/migrate_028_shot_events_dedup.sql \
-                       /work/build/artifacts/sql/migrate_029_shot_target_state.sql \
-                       /work/build/artifacts/sql/migrate_030_shot_target_player.sql \
-                       /work/build/artifacts/sql/migrate_031_shot_shooter_stance.sql \
+                       "${schema_migrations[@]}" \
               --seed /work/build/artifacts/sql/migrate_003_assist_action.sql \
                      /work/build/artifacts/sql/migrate_004_cap_break_action.sql \
                      /work/tests/e2e_stats/fixtures/lane_b_standard_actions.sql \
@@ -692,6 +648,7 @@ jobs:
             build/lane-b-artifacts/database-dump.sql
             build/lane-b-artifacts/bundle-provenance.md
             build/lane-b-artifacts/artifacts/artifact-manifest.json
+            build/lane-b-artifacts/artifacts/schema-migrations.txt
             build/lane-b-artifacts/daemon/PROVENANCE
             build/lane-b-artifacts/engine/provenance.json
           if-no-files-found: warn
