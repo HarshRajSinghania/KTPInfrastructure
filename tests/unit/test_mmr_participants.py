@@ -83,6 +83,33 @@ class Binding(unittest.TestCase):
             [FIXTURE], [game(1, "2026-09-13T19:12:00+00:00")], {1: with_sub}, ROSTERS)
         self.assertIn(99, bound[900]["home_players"], "the sub must be rated, not dropped")
         self.assertEqual(bound[900]["overlap"], 11)
+        self.assertEqual(bound[900]["ringers"], [], "unrostered-anywhere is a sub, not a ringer")
+
+    def test_a_ringer_is_recorded_but_excluded_from_rating(self):
+        """Player 21 is registered to a THIRD team (not home or away) and
+        plays this match for home -- a ringer, not a sub. Recorded in
+        `ringers`, dropped from `home_players` so the ladder never rates it,
+        and the rest of the side is unaffected."""
+        three_teams = {**ROSTERS, 3: {21, 22, 23, 24, 25, 26, 27}}
+        with_ringer = people([(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (21, 1),
+                              (11, 2), (12, 2), (13, 2), (14, 2), (15, 2), (16, 2)])
+        bound, _ = self.MB.bind(
+            [FIXTURE], [game(1, "2026-09-13T19:12:00+00:00")], {1: with_ringer}, three_teams)
+        self.assertEqual(bound[900]["home_players"], [1, 2, 3, 4, 5])
+        self.assertEqual(bound[900]["ringers"], [21])
+        self.assertNotIn(21, bound[900]["home_players"])
+
+    def test_a_ringer_can_appear_on_either_side(self):
+        """Same case, mirrored onto away, and combined with a home-side ringer
+        too -- both are caught and neither leaks onto the wrong side."""
+        three_teams = {**ROSTERS, 3: {21, 22, 23, 24, 25, 26, 27}}
+        both_ringers = people([(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (21, 1),
+                               (11, 2), (12, 2), (13, 2), (14, 2), (15, 2), (22, 2)])
+        bound, _ = self.MB.bind(
+            [FIXTURE], [game(1, "2026-09-13T19:12:00+00:00")], {1: both_ringers}, three_teams)
+        self.assertEqual(bound[900]["home_players"], [1, 2, 3, 4, 5])
+        self.assertEqual(bound[900]["away_players"], [11, 12, 13, 14, 15])
+        self.assertEqual(bound[900]["ringers"], [21, 22])
 
 
 class Divergence(unittest.TestCase):
