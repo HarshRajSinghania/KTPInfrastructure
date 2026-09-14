@@ -111,7 +111,7 @@ def daemon_repo(tmp_path):
         (23, "headshot_observed_provenance"),
         (24, "team_membership_intervals"),
         (25, "position_state_map_revision"),
-        # 026 is deliberately absent upstream; the sequence goes 025 -> 027.
+        # Upstream also carries 002 and 026; Lane B never applies them.
         (27, "shot_events"),
         (28, "shot_events_dedup"),
         (29, "shot_target_state"),

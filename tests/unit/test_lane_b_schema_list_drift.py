@@ -1,134 +1,110 @@
-"""Drift guard for Lane B's migration lists.
+"""Drift guard for Lane B's migration apply order.
 
-Lane B names its schema migrations in THREE places that have to agree:
-
-  * `DEFAULT_SCHEMA_FILES` in `tests/e2e_stats/artifacts.py` decides which
-    files are extracted out of the KTPHLStatsX commit into `artifacts/sql/`.
-  * `lane-b-stats-e2e.yml` names them again on the full lane's `--schema`.
-  * ...and a third time on the corpus lane's `--schema`.
-
-Update one and the lane breaks in a way nothing else catches: a name only the
-workflow knows about is a "no such file" at run time, and a name only
-`DEFAULT_SCHEMA_FILES` knows about is a migration that silently never runs.
-`cap_break` has zero production rows, so the corpus lane is the only place
-that code path is exercised at all -- a list that quietly trails leaves the
-feature untested everywhere.
+`DEFAULT_SCHEMA_FILES` in `tests/e2e_stats/artifacts.py` is the one list. The
+builder writes the part of it the daemon ref under test carries to
+`SCHEMA_MIGRATIONS_LIST`, and both `--schema` blocks in `lane-b-stats-e2e.yml`
+expand that file. A migration named literally in the workflow is the defect
+this guards against: every daemon ref cut before that migration then fails
+with "no such file", which is how every `main`-based KTPHLStatsX PR went red
+on migrate_028.
 
 Deliberately in `tests/unit/` rather than `tests/e2e_stats/`: config-tests.yml
 runs this directory on every PR, while `tests/e2e_stats` only runs inside a
-full Lane B job.
-
-What this CANNOT check: whether KTPHLStatsX has published a migration nobody
-added here. That needs the other repo, and Lane B must not grow a run-time
-network dependency on it. Adding a migration there is still a two-repo change.
+Lane B job.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
-import pytest
-
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
+
+from tests.e2e_stats import artifacts  # noqa: E402
+
 WORKFLOW = REPO / ".github" / "workflows" / "lane-b-stats-e2e.yml"
-ARTIFACTS = REPO / "tests" / "e2e_stats" / "artifacts.py"
 
-_APPLIED = re.compile(r"/work/build/artifacts/sql/(migrate_\d+_[a-z0-9_]+\.sql)")
-_DEFAULTS = re.compile(r'^\s*"sql/(migrate_\d+_[a-z0-9_]+\.sql)",\s*$', re.M)
-
-
-def _workflow_schema_blocks() -> list[list[str]]:
-    """Migration basenames per `--schema` block, in apply order."""
-    text = WORKFLOW.read_text(encoding="utf-8")
-    blocks = []
-    for chunk in text.split("--schema")[1:]:
-        blocks.append(_APPLIED.findall(chunk.split("--seed")[0]))
-    return blocks
+_LITERAL = re.compile(r"/work/build/artifacts/sql/(migrate_\d+_[a-z0-9_]+\.sql)")
+_EXPANSION = '"${schema_migrations[@]}"'
+_READ = ("mapfile -t schema_migrations < "
+         f"build/lane-b-artifacts/artifacts/{artifacts.SCHEMA_MIGRATIONS_LIST}")
 
 
-def _default_schema_files() -> list[str]:
-    """Read the tuple as text, so this stays a pure file-vs-file comparison."""
-    text = ARTIFACTS.read_text(encoding="utf-8")
-    body = text.split("DEFAULT_SCHEMA_FILES = (", 1)[1].split(")", 1)[0]
-    return _DEFAULTS.findall(body)
+def _schema_blocks(text: str) -> list[str]:
+    """The argument text of each `--schema`, up to its `--seed`."""
+    return [chunk.split("--seed")[0] for chunk in text.split("--schema")[1:]]
+
+
+def _schema_steps(text: str) -> list[str]:
+    return [step for step in re.split(r"\n      - name: ", text) if "--schema" in step]
+
+
+def _literal_problems(text: str) -> list[str]:
+    return [f"--schema block {i} hard-codes {found}"
+            for i, block in enumerate(_schema_blocks(text))
+            if (found := _LITERAL.findall(block))]
+
+
+def _expansion_problems(text: str) -> list[str]:
+    problems = [f"--schema block {i} does not apply {_EXPANSION}"
+                for i, block in enumerate(_schema_blocks(text))
+                if _EXPANSION not in block]
+    for step in _schema_steps(text):
+        name = step.splitlines()[0]
+        if _READ not in step:
+            problems.append(f"step {name!r} never reads the builder's list")
+        elif step.index(_READ) > step.index("--schema"):
+            problems.append(f"step {name!r} reads the builder's list after using it")
+    return problems
 
 
 def test_the_parsers_find_something():
-    """A regex that silently matches nothing turns every assertion below into
-    an empty-vs-empty pass. Positive control first."""
-    blocks = _workflow_schema_blocks()
-    assert len(blocks) == 2, f"expected 2 --schema blocks, found {len(blocks)}"
-    assert all(len(b) >= 11 for b in blocks), blocks
-    assert len(_default_schema_files()) >= 11
-
-
-def test_no_migration_is_extracted_without_being_applied():
-    defaults = _default_schema_files()
-    for i, applied in enumerate(_workflow_schema_blocks()):
-        missing = [m for m in defaults if m not in applied]
-        assert not missing, (
-            f"--schema block {i} collects but never applies {missing}; "
-            "add them to lane-b-stats-e2e.yml")
-
-
-def test_no_migration_is_applied_without_being_extracted():
-    defaults = set(_default_schema_files())
-    for i, applied in enumerate(_workflow_schema_blocks()):
-        unknown = [m for m in applied if m not in defaults]
-        assert not unknown, (
-            f"--schema block {i} applies {unknown}, which DEFAULT_SCHEMA_FILES "
-            "never extracts -- the run fails with 'no such file'")
-
-
-def test_both_lanes_apply_the_same_migrations_in_the_same_order():
-    full, corpus = _workflow_schema_blocks()
-    assert full == corpus, (
-        "the full and corpus lanes disagree; updating one list and not the "
-        "other is the exact defect this file exists to catch")
-
-
-def test_ordinals_are_strictly_increasing():
-    for i, applied in enumerate(_workflow_schema_blocks()):
-        ordinals = [int(m.split("_")[1]) for m in applied]
-        assert ordinals == sorted(set(ordinals)), (
-            f"--schema block {i} is out of order or repeats: {ordinals}")
-
-
-@pytest.mark.parametrize("injected", ["migrate_099_invented.sql"])
-def test_guard_actually_fails_on_injected_drift(injected, tmp_path, monkeypatch):
-    """Break it on purpose. A drift guard that cannot be made to fail proves
-    nothing about the case it was written for."""
+    """A split that matches nothing turns every check below into a pass."""
     text = WORKFLOW.read_text(encoding="utf-8")
-    # Anchor inside a --schema block, not just the last match in the file --
-    # the file's last match is a --seed entry, and rewriting that drifts
-    # nothing this guard looks at.
-    anchor = _workflow_schema_blocks()[0][-1]
-    drifted = tmp_path / "drifted.yml"
-    schema_start = text.index("--schema")
-    drifted.write_text(
-        text[:schema_start] + text[schema_start:].replace(anchor, injected, 1),
-        encoding="utf-8")
-    monkeypatch.setitem(_workflow_schema_blocks.__globals__, "WORKFLOW", drifted)
-    assert injected in _workflow_schema_blocks()[0]
-
-    with pytest.raises(AssertionError):
-        test_no_migration_is_applied_without_being_extracted()
-    with pytest.raises(AssertionError):
-        test_both_lanes_apply_the_same_migrations_in_the_same_order()
+    assert len(_schema_blocks(text)) == 2
+    assert len(_schema_steps(text)) == 2
+    assert sum("migrate_" in rel for rel in artifacts.DEFAULT_SCHEMA_FILES) >= 11
 
 
-def test_guard_catches_a_list_that_trails_the_extraction_set(tmp_path, monkeypatch):
-    """The original defect, encoded: KTPHLStatsX gains a migration, someone
-    adds it to DEFAULT_SCHEMA_FILES, and the workflow's own lists trail."""
+def test_no_schema_block_names_a_migration_literally():
+    problems = _literal_problems(WORKFLOW.read_text(encoding="utf-8"))
+    assert not problems, (
+        f"{problems}: a daemon ref without those files fails with 'no such "
+        f"file'; register them in DEFAULT_SCHEMA_FILES and expand {_EXPANSION}")
+
+
+def test_every_schema_block_applies_the_builder_list():
+    problems = _expansion_problems(WORKFLOW.read_text(encoding="utf-8"))
+    assert not problems, problems
+
+
+def test_apply_order_is_strictly_increasing():
+    ordinals = [int(Path(rel).name.split("_")[1])
+                for rel in artifacts.DEFAULT_SCHEMA_FILES
+                if Path(rel).name.startswith("migrate_")]
+    assert ordinals == sorted(set(ordinals)), ordinals
+
+
+def test_no_migration_is_both_applied_and_marked_never_applied():
+    applied = set(artifacts.DEFAULT_SCHEMA_FILES) | set(artifacts.DEFAULT_SEED_FILES)
+    assert not applied & set(artifacts.NOT_APPLIED_MIGRATIONS)
+
+
+def test_guard_fails_on_a_reintroduced_literal():
     text = WORKFLOW.read_text(encoding="utf-8")
-    trailing = _workflow_schema_blocks()[0][-1]
-    drifted = tmp_path / "trailing.yml"
-    drifted.write_text(
-        "\n".join(ln for ln in text.splitlines()
-                  if f"/work/build/artifacts/sql/{trailing}" not in ln),
-        encoding="utf-8")
-    monkeypatch.setitem(_workflow_schema_blocks.__globals__, "WORKFLOW", drifted)
+    drifted = text.replace(
+        _EXPANSION,
+        _EXPANSION + " \\\n                       "
+        "/work/build/artifacts/sql/migrate_099_invented.sql",
+        1)
+    assert drifted != text
+    assert _literal_problems(drifted)
 
-    with pytest.raises(AssertionError):
-        test_no_migration_is_extracted_without_being_applied()
+
+def test_guard_fails_when_one_lane_stops_reading_the_list():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    drifted = text.replace(_READ, "true", 1)
+    assert drifted != text
+    assert _expansion_problems(drifted)

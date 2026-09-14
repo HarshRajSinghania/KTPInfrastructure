@@ -54,6 +54,7 @@ from tests.e2e_stats.artifacts import (  # noqa: E402
     ArtifactSet,
     BuildError,
     DEFAULT_SCHEMA_FILES,
+    DEFAULT_SEED_FILES,
 )
 
 
@@ -84,9 +85,7 @@ def main() -> int:
 
     ap.add_argument("--schema", nargs="*", default=list(DEFAULT_SCHEMA_FILES),
                     help="Schema files, repo-relative, in apply order")
-    ap.add_argument("--seed", nargs="*",
-                    default=["sql/migrate_003_assist_action.sql",
-                             "sql/migrate_004_cap_break_action.sql"],
+    ap.add_argument("--seed", nargs="*", default=list(DEFAULT_SEED_FILES),
                     help="Action seed files, repo-relative, in apply order")
     args = ap.parse_args()
 
