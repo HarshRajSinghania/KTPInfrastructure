@@ -145,7 +145,7 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
     # how much of the week was rated on real participation.
     played = actual_participants(key, matches_raw, rosters) if bridge is None else {}
 
-    out, pending, used_actual = [], 0, 0
+    out, pending, used_actual, ringer_appearances = [], 0, 0, 0
     for m in matches_raw:
         if m["home_score"] is None or m["away_score"] is None or m["home_score"] == m["away_score"]:
             pending += 1
@@ -154,6 +154,7 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
         if binding:
             home, away = set(binding["home_players"]), set(binding["away_players"])
             used_actual += 1
+            ringer_appearances += len(binding.get("ringers", []))
         else:
             home = rosters.get(m["home_season_team_id"], set())
             away = rosters.get(m["away_season_team_id"], set())
@@ -172,10 +173,15 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
             margin=abs(m["home_score"] - m["away_score"]),
             home_score=m["home_score"], away_score=m["away_score"],
             actual_roster=bool(binding),
+            # Recorded but excluded from t1/t2 -- see match_binding._ringers.
+            # Kept on the row, not just the aggregate count, so a specific
+            # match's ringer(s) can be traced back from the digest/summary.
+            ringers=sorted(binding.get("ringers", [])) if binding else [],
         ))
     out.sort(key=lambda m: m["when"])
     return out, dict(pending=pending, total_scheduled=len(matches_raw),
-                     rated_on_actual_participants=used_actual)
+                     rated_on_actual_participants=used_actual,
+                     ringer_appearances=ringer_appearances)
 
 
 def season_rosters(key: str, season_number: int):
@@ -318,8 +324,13 @@ def main():
 
     digest = [f"# MMR weekly digest -- {now}\n",
               f"**{len(matches)} completed league matches** rated so far; "
-              f"{counts['pending']} fixtures still scheduled.\n",
-              "## Prediction accuracy to date\n",
+              f"{counts['pending']} fixtures still scheduled.\n"]
+    if counts.get("ringer_appearances"):
+        digest.append(
+            f"{counts['ringer_appearances']} ringer appearance(s) recorded this week -- a "
+            "player who played for a team other than the one they're registered to. Recorded, "
+            "but excluded from every rating those matches would otherwise have moved.\n")
+    digest += ["## Prediction accuracy to date\n",
               f"| Metric | Value |", "|---|---|",
               f"| Matches predicted | {metrics['n']} |",
               f"| Accuracy | {metrics['acc']:.1%} |",
@@ -370,6 +381,7 @@ def main():
     (HERE / "weekly_digest.md").write_text("\n".join(digest) + "\n", encoding="utf-8")
     (HERE / "weekly_summary.json").write_text(json.dumps(dict(
         generated_at=now, completed_matches=len(matches), pending=counts["pending"],
+        ringer_appearances=counts.get("ringer_appearances", 0),
         accuracy=metrics["acc"], log_loss=metrics["log_loss"], brier=metrics["brier"], ece=metrics["ece"],
         upsets=len(upsets), challenger_beat_champion=bool(beat_champion),
         challenger_name=beat_champion[0]["name"] if beat_champion else None,

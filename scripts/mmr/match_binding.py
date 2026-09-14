@@ -41,6 +41,24 @@ candidate, 11-12 of 12 participants recognised, every start within 20 minutes
 of kickoff. The 11s are real -- a player on the server who is not on the
 registered roster, which is exactly the rotation the registered roster cannot
 see.
+
+Ringers
+-------
+Some of those "not on the registered roster" players are a different case
+from a walk-on filling a gap: they are registered to ANOTHER team this
+season, guesting on this side for one match. Their rating must not move on
+it -- a ringer's MMR should reflect the team they actually play for, not a
+one-off appearance elsewhere, and crediting the borrowed team with a match
+that isn't a real reflection of their own roster would be the same
+bench-padding problem this module exists to avoid, just one hop removed.
+
+A player who is registered nowhere at all this season is NOT a ringer; they
+are a legitimate substitute and are rated normally, same as today -- `bind`
+is given every team's roster, not just the fixture's two, specifically so it
+can tell "registered to a different team" apart from "registered to no
+team." Ringers are still returned, separately, so they are recorded rather
+than silently dropped -- just excluded from `home_players`/`away_players`,
+the sets the ladder actually rates on.
 """
 from __future__ import annotations
 
@@ -96,6 +114,24 @@ def _orient(participants, home_roster, away_roster):
     return (pa, pb) if straight > swapped else (pb, pa)
 
 
+def _ringers(side_players, own_roster, own_team_id, rosters):
+    """Of `side_players`, who is registered to a DIFFERENT team this season.
+
+    Checked against every roster, not just this fixture's two, since a
+    ringer's own team may not even be playing tonight. A player in neither
+    `own_roster` nor any other team's roster is registered nowhere -- a
+    legitimate substitute, not a ringer -- and is never returned here.
+    """
+    unrostered = side_players - own_roster
+    if not unrostered:
+        return set()
+    ringers = set()
+    for team_id, roster in rosters.items():
+        if team_id != own_team_id:
+            ringers |= unrostered & roster
+    return ringers
+
+
 def bind(fixtures, game_matches, participants_by_game, rosters):
     """Bind fixtures to game matches.
 
@@ -103,16 +139,22 @@ def bind(fixtures, game_matches, participants_by_game, rosters):
               away_season_team_id.
     game_matches: rows with id, game_match_id, started_at.
     participants_by_game: {game_match.id: [game_match_player rows]}.
-    rosters: {season_team_id: set(player_id)} -- registered rosters, used only
-             to recognise and orient participants, never as the roster itself.
+    rosters: {season_team_id: set(player_id)} -- EVERY registered season
+             roster, not just a fixture's own two -- used to recognise and
+             orient participants against the fixture at hand, and to
+             recognise a ringer (registered to a different team than the one
+             they played this match for) against every other one. Never used
+             as the roster itself.
 
-    Returns (bound, unbound). Each bound entry carries the participants that
-    actually played, plus why it was accepted.
+    Returns (bound, unbound). Each bound entry carries the participants whose
+    rating this match should move, the ringers it found (recorded, not
+    rated), and why the fixture was accepted.
     """
     bound, unbound = {}, []
     for f in fixtures:
-        home = rosters.get(f["home_season_team_id"], set())
-        away = rosters.get(f["away_season_team_id"], set())
+        home_id, away_id = f["home_season_team_id"], f["away_season_team_id"]
+        home = rosters.get(home_id, set())
+        away = rosters.get(away_id, set())
         candidates = []
         for g in game_matches:
             gap = _hours_apart(g.get("started_at"), f.get("scheduled_at"))
@@ -129,11 +171,15 @@ def bind(fixtures, game_matches, participants_by_game, rosters):
             oriented = _orient(people, home, away)
             if oriented is None:
                 continue
+            home_all, away_all = oriented
+            home_ringers = _ringers(home_all, home, home_id, rosters)
+            away_ringers = _ringers(away_all, away, away_id, rosters)
             candidates.append({
                 "game_match_id": g.get("game_match_id"),
                 "game_match_key": g["id"],
-                "home_players": sorted(oriented[0]),
-                "away_players": sorted(oriented[1]),
+                "home_players": sorted(home_all - home_ringers),
+                "away_players": sorted(away_all - away_ringers),
+                "ringers": sorted(home_ringers | away_ringers),
                 "overlap": overlap_home + overlap_away,
                 "hours_from_kickoff": round(gap, 2),
             })
