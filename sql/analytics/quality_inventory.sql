@@ -24,12 +24,18 @@ SELECT
     WHERE match_id = {{MATCH_ID}}) AS statsme_hits,
   (SELECT COALESCE(SUM(head + chest + stomach + leftarm + rightarm + leftleg + rightleg), 0)
     FROM hlstats_Events_Statsme2 WHERE match_id = {{MATCH_ID}}) AS located_hits,
-  (SELECT COUNT(*) FROM ktp_flag_captures
-    WHERE match_id = {{MATCH_ID}}) AS capture_credits,
+  -- Both counts exclude warmup bleed-through, matching what the report
+  -- actually displays -- see capture_credit_fact.sql.
+  (SELECT COUNT(*) FROM ktp_flag_captures c
+    LEFT JOIN ktp_matches m ON m.match_id = c.match_id AND m.half = c.half
+    WHERE c.match_id = {{MATCH_ID}}
+      AND (m.start_time IS NULL OR c.event_time > m.start_time)) AS capture_credits,
   (SELECT COUNT(*) FROM (
-      SELECT 1 FROM ktp_flag_captures
-      WHERE match_id = {{MATCH_ID}}
-      GROUP BY half, team, flag_name, event_time
+      SELECT 1 FROM ktp_flag_captures c
+      LEFT JOIN ktp_matches m ON m.match_id = c.match_id AND m.half = c.half
+      WHERE c.match_id = {{MATCH_ID}}
+        AND (m.start_time IS NULL OR c.event_time > m.start_time)
+      GROUP BY c.half, c.team, c.flag_name, c.event_time
    ) capture_events) AS unique_capture_events,
   (SELECT COUNT(*) FROM ktp_position_samples
     WHERE match_id = {{MATCH_ID}} AND half > 0) AS position_samples,
