@@ -119,11 +119,18 @@ ALTERNATE_HASHES = {
     # trait-gated guard (BenignVariantManifestSyncTests) that fails naming any entry
     # present in one and missing from the other, or allowlisted for an untracked path.
     #
-    # On a "review" path an alternate no longer decides whether anyone is flagged --
-    # nothing here can flag. It decides only whether we take a copy, and these two
-    # hashes are a community pack already adjudicated across the corpus. Collecting
-    # the twentieth byte-identical copy of it teaches an admin nothing and widens
-    # what we hold on players who did nothing.
+    # These two are deliberately NOT in the client's KnownBenignFileVariants any more --
+    # it dropped both once the paths became allowed at any hash. The sync guard's
+    # tracked-path test reads client -> manifest, so an entry the client no longer holds
+    # asks nothing of this table.
+    #
+    # They still earn their place: an AllowedAlternateHashes match hits `continue` BEFORE
+    # the IsReview branch, so a viewmodel on one of these hashes produces no review record
+    # and no copied bytes at all. That is the intent -- the hash already names the file,
+    # and only an unrecognised variant needs an admin looking at bytes.
+    #
+    # ⚠ The reverse guard, EveryManifestAlternate_IsAlsoInTheClientAllowlist, reads
+    # manifest -> client and WILL name these two until the AC side reconciles.
     "models/v_grenade.mdl": [
         "bb8ac11263e3a9b70e342cf9210c6e2fbd36c071b2ffb985479186f28e122634",
     ],

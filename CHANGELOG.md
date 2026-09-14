@@ -19,12 +19,18 @@ is not new — `gfx/env/*` has shipped at it since 2026-08-27.
   `REVIEW_PATH_PREFIXES`. `models/` cannot be a prefix rule without releasing
   the weapon kit, so the set is matched whole. Their explicit emit block and
   their two `ALTERNATE_HASHES` entries come back unchanged.
-- The alternates are kept deliberately. On a `review` path an alternate no
-  longer decides whether anyone is flagged — nothing here can flag — so all it
-  decides is whether we take a copy, and those two hashes are a community pack
-  already adjudicated across the corpus. It also keeps this table equal to
-  KTPAntiCheat's `KnownBenignFileVariants`, which is what its
-  `Manifest=required` sync guard checks.
+- The alternates are kept deliberately. An `AllowedAlternateHashes` match hits
+  `continue` before the `IsReview` branch, so a viewmodel on one of those two
+  hashes produces no review record and no copied bytes at all — which is the
+  intent: the hash already names the file, and only an unrecognised variant
+  needs an admin looking at bytes.
+- KTPAntiCheat has since dropped both entries from `KnownBenignFileVariants`,
+  so the two tables are now deliberately unequal in that direction. It costs
+  nothing on the tracked-path sync test, which reads client → manifest. ⚠️ The
+  reverse test, `EveryManifestAlternate_IsAlsoInTheClientAllowlist`, reads
+  manifest → client and will name these two until the AC side reconciles —
+  it is `Manifest=required` and excluded from CI, so it blocks nothing, but
+  somebody has to settle whether the known community pack gets captured.
 - `categorize()` now names the three `grenade_model` itself. The `.res` route
   called them `model_other` while the explicit route said `grenade_model`, and
   the dossier prints the category. Caught by the new tests, not by review.
