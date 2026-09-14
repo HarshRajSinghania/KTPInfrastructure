@@ -18,6 +18,9 @@ Read [docs/DEPLOYMENT_TARGETS.md](docs/DEPLOYMENT_TARGETS.md) before anything el
 the paths that are load-bearing for the live fleet from the ones that only exist for local
 development, and that distinction decides how much care a change needs.
 
+**A design that ships as a document is NOT done** — every proposal in a docs-only PR becomes a
+tracked board item in the same act (operator ruling 2026-09-14). See `DESIGN_DOCS_ARE_NOT_DONE.md`.
+
 ---
 
 ## Two rules that come before everything
