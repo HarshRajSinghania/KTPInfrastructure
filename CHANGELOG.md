@@ -4,6 +4,27 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `tier2`: pin the reviewed KTPMatchHandler build to 0.10.173 (2026-09-14)
+
+The Tier-2 integration workflow pinned `b891b0e` (0.10.170). The fleet ran that
+same build until the `wave-20260913T182820Z` swap activated 0.10.172 at the
+03:00 ET restart on 09-14, so the pin became the stale half of a parity that had
+held until then.
+
+- Pin moves to `b3b3d93` (0.10.173, the `KTPMatchHandler`#37 merge), not to the
+  0.10.172 the fleet currently runs. 0.10.173 is merged and unstaged, and it
+  fixes an AC flush cursor rotation that duplicated and dropped shots; pinning it
+  smokes the next build against current infra before it reaches a wave, which is
+  worth more here than mirroring what is already deployed.
+- One line. The asserted version is derived by `sed` from the pinned source, so
+  the ref is the only thing to bump; `KTP_EXPECTED_MATCHHANDLER_VERSION` stays
+  blank and follows the pin.
+- No runner-side change: the workflow compiles the pinned source in test mode and
+  `install -D`s it, so the artifact on the runner is replaced on the next run.
+- The job path-filters itself and runs pytest only when `tests/integration/`,
+  `tests/smoke/` or this workflow change. This PR touches the workflow, so the
+  integration tests do run against 0.10.173 here.
+
 ### `support-web`/`support-poller`: default `public.json` path no longer names the deleted docroot (2026-09-14)
 
 `PUBLIC_DEFAULT`/`public_json` in both `run_poller.py` copies and `app/config.py`,

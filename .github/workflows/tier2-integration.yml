@@ -231,7 +231,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/KTPMatchHandler
-          ref: b891b0e26f21631357149f8a9bc93d06ec904b43
+          ref: b3b3d93158110e2a9f45a8b444cabfea27ace1c4
           path: .tier2/KTPMatchHandler
 
       - name: Checkout reviewed KTPAMXX preprod includes
