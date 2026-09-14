@@ -1560,6 +1560,13 @@ def project_official_score(
 
     ``match_end`` is optional quality evidence only.  Its side-oriented values
     are compared to the final authoritative team_score row and never replace it.
+
+    Do not build on this without fixing it first: it is unavailable on every
+    real observer stream.  It reads the 0/0 dip just after a half opens as a
+    score movement rather than as the not-yet-restored carry, and it compares
+    ``match_end`` through the terminal half's side slots while ``ktp_match_end``
+    states the total in half 1's.  ``scripts/in_game_result.py`` reads the same
+    stream with both rules right, and is what the match report uses.
     """
     flags: set[str] = set()
     fatal = False
