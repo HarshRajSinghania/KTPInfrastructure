@@ -4,6 +4,65 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`, `sql`, `config`: match reports carry kill streaks, per-side weapon and duel splits, and per-class rows (2026-09-14)
+
+Builds items 1-5 of `docs/proposals/streaks-and-side-splits.md`. Report schema
+10 -> 11, website contract `analytics-report-dto-v1.1.0` -> `v1.2.0` (additive;
+a report built before schema 11 reads `status: unavailable`, flag
+`not-in-report`, never zero).
+
+- `player_halves.rows[]` gains `side` (the side the player held that half, from
+  the life ledger) and `best_streak`. Cap breaks take `producer_half` when the
+  archive carries it, instead of placement by event time.
+- `kill_streaks` (`kill_streak_v1`, `scripts/kill_streaks.py`): best run of
+  enemy kills between the player's own life ends, per half, per match
+  (`players[]`) and per side (`players[].by_side`). Own teamkills neither count
+  nor reset; a grenade landing after the thrower died counts toward the fresh
+  counter; a frag with no producer clock takes the victim's death time when one
+  unclaimed death boundary lies within 2 s, otherwise its row is `lower_bound`.
+  Never the stock hlstatsx `kill_streak_N` actions. `players[].best_streak` is
+  the match value.
+- `weapon_sides` (`sql/analytics/weapon_half_fact.sql`): kills, headshot kills,
+  shots, hits and damage per player per half per weapon, under the player's
+  side, so picked-up enemy weapons stay on the player's side. `reconciled` says
+  whether the rows sum back to `weapons[]`.
+- `duels_by_side`: `duels[]` split by the killer's side, with `reconciled`.
+- `player_classes`: lives, kills, deaths and headshot kills per class id read at
+  spawn, labelled from `config/analytics/dod_classes.toml` (pinned against
+  hlstatsx `killerRole` by a test). No accuracy per class: shots have no class
+  or time at the source.
+- Not built: clutches (naming ruling pending) and momentum per side (profile
+  is still DRAFT).
+- Deploy regenerates every in-season match at schema 11 on the next tick, and
+  report_sync inserts them as new rows (the site reads the highest id).
+
+### `lane-b`: apply the migrations the KTPHLStatsX ref under test carries (2026-09-14)
+
+Lane B extracted a fixed migration list out of the KTPHLStatsX commit under
+test, so every `main`-based KTPHLStatsX PR, and this repo's post-merge
+`lane-b-corpus-main` run, failed at the build step with
+`sql/migrate_028_shot_events_dedup.sql not found`: 028 onward exist only on
+KTPHLStatsX `preprod`.
+
+- `ArtifactSet.collect` lists the daemon commit's `sql/migrate_*.sql` and skips
+  any `DEFAULT_SCHEMA_FILES` migration newer than the ref, printing a
+  `::warning::` per skipped file and recording `schema_applied` /
+  `schema_skipped` in the manifest.
+- Still fatal: a gap (the ref carries a migration but not one that applies
+  before it); a carried migration with no apply position in
+  `DEFAULT_SCHEMA_FILES` and no reason in `NOT_APPLIED_MIGRATIONS`; a missing
+  `ktp_schema.sql`, `hlstats.pl` or seed.
+- The builder writes the applied migrations to `artifacts/schema-migrations.txt`
+  and both `--schema` blocks in `lane-b-stats-e2e.yml` expand it, so
+  `DEFAULT_SCHEMA_FILES` is the only list. The drift guard now fails if a
+  literal migration path returns to the workflow.
+- Adding a KTPHLStatsX migration: register it here first. Refs without it skip
+  it; the PR that adds it then applies it.
+- KTPHLStatsX's required check runs this workflow's YAML at a pinned sha but
+  takes `tests/` and `scripts/` from this repo's `preprod`, so it picks up the
+  builder change once `reconcile-preprod` fast-forwards `preprod`. The YAML
+  half reaches that check only when the pin moves.
+
 ### `scripts/report_sync`: revalidate the site's match-report cache after a sync (2026-09-14)
 
 A synced `ktp.match_report` row sat behind the site's `cacheLife("hours")` read

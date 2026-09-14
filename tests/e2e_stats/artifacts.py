@@ -101,19 +101,70 @@ DEFAULT_SCHEMA_FILES = (
     # upsert has no key to collide with and silently degrades to a plain INSERT,
     # so a lane running 027 alone exercises the dedup path as a no-op and reports
     # clean whether or not it works.
-    #
-    # No closing-paren character anywhere above this line, on purpose. The
-    # drift guard in tests/unit/test_lane_b_schema_list_drift.py finds this
-    # tuple's end by splitting the source text on the first closing-paren
-    # character after "DEFAULT_SCHEMA_FILES = ", so one inside a comment above
-    # here truncates every entry that follows it out of DEFAULT_SCHEMA_FILES --
-    # silently, since the truncated list is still valid Python. That is
-    # exactly what a stray one in an earlier version of this comment did.
     "sql/migrate_028_shot_events_dedup.sql",
     "sql/migrate_029_shot_target_state.sql",
     "sql/migrate_030_shot_target_player.sql",
     "sql/migrate_031_shot_shooter_stance.sql",
 )
+
+DEFAULT_SEED_FILES = (
+    "sql/migrate_003_assist_action.sql",
+    "sql/migrate_004_cap_break_action.sql",
+)
+
+# Carried by KTPHLStatsX but never applied here; any other unlisted migration fails the build.
+NOT_APPLIED_MIGRATIONS = {
+    "sql/migrate_002_half_damage_score.sql": "its columns are already in ktp_schema.sql",
+    "sql/migrate_026_match_reports.sql": "report-store tables the daemon never writes",
+}
+
+# Both workflow schema blocks expand this file, so DEFAULT_SCHEMA_FILES stays the only list.
+SCHEMA_MIGRATIONS_LIST = "schema-migrations.txt"
+
+_MIGRATION_PATH = re.compile(r"^sql/migrate_[^/]*\.sql$")
+
+
+def committed_migrations(repo: Path, ref: str) -> frozenset[str]:
+    """Every `sql/migrate_*.sql` in the commit's tree."""
+    r = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "--name-only", ref, "--", "sql/"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise BuildError(f"cannot list sql/ at {ref} in {repo}:\n{r.stderr.strip()}")
+    return frozenset(p for p in r.stdout.splitlines() if _MIGRATION_PATH.match(p))
+
+
+def plan_schema_files(
+    schema_files: tuple[str, ...],
+    carried: frozenset[str],
+    *,
+    registered: tuple[str, ...],
+) -> tuple[list[str], list[str]]:
+    """Split `schema_files` into (apply, skip) for a daemon commit carrying `carried`.
+
+    Only migrations newer than the commit are skipped. A gap, or a carried
+    migration with no apply position, is a build error.
+    """
+    unregistered = sorted(carried - set(registered))
+    if unregistered:
+        raise BuildError(
+            "daemon ref carries " + ", ".join(unregistered) + ", which Lane B has "
+            "no apply position for: add it to DEFAULT_SCHEMA_FILES, or to "
+            "NOT_APPLIED_MIGRATIONS with the reason it is not applied")
+    apply: list[str] = []
+    skip: list[str] = []
+    for rel in schema_files:
+        is_migration = bool(_MIGRATION_PATH.match(rel))
+        if is_migration and rel not in carried:
+            skip.append(rel)
+        elif is_migration and skip:
+            raise BuildError(
+                f"daemon ref carries {rel} but not {skip[0]}, which applies "
+                "before it; Lane B only skips migrations newer than the ref")
+        else:
+            apply.append(rel)
+    return apply, skip
 
 def _md5(path: Path) -> str:
     h = hashlib.md5()
@@ -529,10 +580,7 @@ class ArtifactSet:
         daemon_ref: str,
         include_plugin: bool = True,
         schema_files: tuple[str, ...] = DEFAULT_SCHEMA_FILES,
-        seed_files: tuple[str, ...] = (
-            "sql/migrate_003_assist_action.sql",
-            "sql/migrate_004_cap_break_action.sql",
-        ),
+        seed_files: tuple[str, ...] = DEFAULT_SEED_FILES,
     ) -> "ArtifactSet":
         """Pull every source artifact out of the two repos at the given refs.
 
@@ -579,7 +627,16 @@ class ArtifactSet:
         inst.hlstats_pl = extract(
             daemon_repo, daemon_sha, "scripts/hlstats.pl", build_dir / "hlstats.pl")
 
-        for rel in schema_files:
+        applied, skipped = plan_schema_files(
+            tuple(schema_files),
+            committed_migrations(daemon_repo, daemon_sha),
+            registered=(*DEFAULT_SCHEMA_FILES, *DEFAULT_SEED_FILES,
+                        *NOT_APPLIED_MIGRATIONS, *schema_files, *seed_files),
+        )
+        for rel in skipped:
+            print(f"::warning title=Lane B schema::skipped {rel}: KTPHLStatsX "
+                  f"{daemon_sha[:12]} does not carry it", flush=True)
+        for rel in applied:
             inst.schema_sql.append(
                 extract(daemon_repo, daemon_sha, rel, build_dir / "sql" / Path(rel).name))
         # The runner's canonical argument is `base-schema.sql`; retain the
@@ -588,11 +645,15 @@ class ArtifactSet:
         for rel in seed_files:
             inst.seed_sql.append(
                 extract(daemon_repo, daemon_sha, rel, build_dir / "sql" / Path(rel).name))
+        (build_dir / SCHEMA_MIGRATIONS_LIST).write_text(
+            "".join(f"{p}\n" for p in inst.schema_sql if p.name.startswith("migrate_")),
+            encoding="utf-8")
 
         inst.provenance = {
             "amxx": {"repo": str(amxx_repo), "ref": amxx_ref, "sha": amxx_sha,
                      "gamedata": gamedata_provenance},
-            "daemon": {"repo": str(daemon_repo), "ref": daemon_ref, "sha": daemon_sha},
+            "daemon": {"repo": str(daemon_repo), "ref": daemon_ref, "sha": daemon_sha,
+                       "schema_applied": applied, "schema_skipped": skipped},
         }
         return inst
 
