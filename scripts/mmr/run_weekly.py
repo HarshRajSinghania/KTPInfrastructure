@@ -29,7 +29,7 @@ import json
 import os
 import urllib.request
 import urllib.error
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,6 +133,56 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
     return out, dict(pending=pending, total_scheduled=len(matches_raw))
 
 
+def season_rosters(key: str, season_number: int):
+    """(rosters, current_division, division_sizes) for one season.
+
+    Shared with seeding_report.py so both read rosters the same way -- a
+    second loader would be a second set of filter decisions to keep in step.
+    Player keys match whatever run_weekly rated on (website player ids in CI,
+    hlstatsx ids locally when the Steam bridge is present).
+    """
+    bridge = load_bridge()
+    merges = L.load_identity_merges() if bridge is not None else {}
+    seasons = {s["id"]: s["number"] for s in fetch(key, "season", "id,number")}
+    season_ids = [sid for sid, num in seasons.items() if num == season_number]
+    if not season_ids:
+        return {}, {}, []
+    sid = season_ids[0]
+
+    divisions = {d["id"]: d["name"] for d in fetch(key, "division", "id,name,season_id")
+                 if d["season_id"] == sid}
+    teams = {t["id"]: t["name"] for t in fetch(key, "team", "id,name")}
+    steam_by_pid = {p["player_id"]: p["steam_id64"]
+                    for p in fetch(key, "player_steam", "player_id,steam_id64,status")
+                    if p["status"] == "current"}
+    season_teams = {t["id"]: t for t in fetch(key, "season_team", "id,season_id,team_id,division_id,status")
+                    if t["season_id"] == sid}
+
+    rosters, current = defaultdict(list), {}
+    for row in fetch(key, "season_team_member", "season_team_id,player_id,left_at"):
+        st = season_teams.get(row["season_team_id"])
+        if not st or row.get("left_at"):
+            continue
+        name = teams.get(st["team_id"], f"team-{st['team_id']}")
+        current[name] = divisions.get(st["division_id"])
+        if bridge is None:
+            rosters[name].append(row["player_id"])
+            continue
+        steam64 = steam_by_pid.get(row["player_id"])
+        if not steam64:
+            continue
+        pid = bridge.get(steam64_to_hlstats(steam64))
+        if pid is not None:
+            rosters[name].append(merges.get(pid, pid))
+
+    counts = Counter(d for d in current.values() if d)
+    # Order divisions strongest-first; the league's own tier order is not in
+    # this payload, so fall back to the conventional Gold/Silver/Bronze.
+    rank = {"Gold": 0, "Silver": 1, "Bronze": 2}
+    sizes = sorted(counts.items(), key=lambda kv: rank.get(kv[0], 99))
+    return dict(rosters), current, sizes
+
+
 def run(matches, model_factory):
     """Predict each match before applying it, then update. Returns per-match
     rows and the metrics over all predictions made."""
@@ -140,10 +190,17 @@ def run(matches, model_factory):
     rows, preds, ys = [], [], []
     for m in matches:
         p = model.predict(m["t1"], m["t2"])
+        # The lean survives damping; the confidence does not. Scoring uses the
+        # damped value (it is what we actually claim), but "did it pick the
+        # right side" reads the lean, so a fully-damped 0.500 is not silently
+        # counted as a pick for the away team.
+        raw = model.predict_raw(m["t1"], m["t2"]) if hasattr(model, "predict_raw") else p
+        evidence = model.evidence(m["t1"], m["t2"]) if hasattr(model, "evidence") else None
         rows.append(dict(match_id=m["match_id"], when=m["when"], home=m["home_team"], away=m["away_team"],
-                          division=m["division"], p_home=round(p, 3), y=m["y"],
-                          home_score=m["home_score"], away_score=m["away_score"],
-                          correct=bool((p > 0.5) == (m["y"] == 1.0)), margin=m["margin"]))
+                          division=m["division"], p_home=round(p, 3), p_raw=round(raw, 3),
+                          evidence=round(evidence, 2) if evidence is not None else None,
+                          y=m["y"], home_score=m["home_score"], away_score=m["away_score"],
+                          correct=bool((raw > 0.5) == (m["y"] == 1.0)), margin=m["margin"]))
         preds.append(p)
         ys.append(m["y"])
         model.update(m["t1"], m["t2"], m["y"])
@@ -225,26 +282,35 @@ def main():
               f"| Brier | {metrics['brier']:.4f} |",
               f"| Calibration error (ECE) | {metrics['ece']:.4f} |",
               "",
-              "Baseline for comparison: a coin flip scores 0.693 log-loss, 0.25 Brier, 50% accuracy.\n",
+              "Baseline for comparison: a coin flip scores 0.693 log-loss, 0.25 Brier, 50% accuracy.",
+              "",
+              "**Lean** is the side the ladder favours. **Confidence** is how much of that lean it",
+              "has earned: it is pulled toward 50% by how few matches back the thinner of the two",
+              "rosters, so early in a season most calls read near 50% on purpose. A confident wrong",
+              "call costs far more than an uncertain one, so the ladder does not claim certainty it",
+              "cannot support.",
+              "",
               "## Most recent results vs predictions\n",
-              "| Match | Division | Predicted | Result | Called? |", "|---|---|---|---|---|"]
+              "| Match | Division | Lean | Confidence | Result | Side called |",
+              "|---|---|---|---|---|---|"]
     for r in rows[-10:]:
-        pred_side = r["home"] if r["p_home"] > 0.5 else r["away"]
+        lean = r["home"] if r["p_raw"] > 0.5 else r["away"]
         conf = max(r["p_home"], 1 - r["p_home"])
+        ev = "" if r["evidence"] is None else f" · {r['evidence']:.0f} match{'' if r['evidence'] == 1 else 'es'} of evidence"
         winner = r["home"] if r["y"] == 1.0 else r["away"]
-        digest.append(f"| {r['home']} vs {r['away']} | {r['division']} | {pred_side} ({conf:.0%}) | "
+        digest.append(f"| {r['home']} vs {r['away']} | {r['division']} | {lean} | {conf:.0%}{ev} | "
                       f"{winner} {r['home_score']}-{r['away_score']} | {'yes' if r['correct'] else 'NO'} |")
     if upsets:
         digest += ["", f"## Upsets worth a look ({len(upsets)})\n",
-                   "Matches the model called confidently and got wrong. These are the ones "
-                   "worth understanding -- each is either a real signal the rating is missing "
-                   "or a genuine surprise.\n",
-                   "| Match | Predicted | Actual | Margin |", "|---|---|---|---|"]
+                   "Matches the model called confidently and got wrong -- confident meaning after "
+                   "damping, so these are misses it actually had the evidence to avoid. Each is "
+                   "either a real signal the rating is missing or a genuine surprise.\n",
+                   "| Match | Lean | Confidence | Actually won | Margin |", "|---|---|---|---|---|"]
         for r in upsets[-8:]:
-            pred_side = r["home"] if r["p_home"] > 0.5 else r["away"]
+            lean = r["home"] if r["p_raw"] > 0.5 else r["away"]
             winner = r["home"] if r["y"] == 1.0 else r["away"]
-            digest.append(f"| {r['home']} vs {r['away']} | {pred_side} "
-                          f"({max(r['p_home'], 1-r['p_home']):.0%}) | {winner} | {r['margin']} |")
+            digest.append(f"| {r['home']} vs {r['away']} | {lean} | "
+                          f"{max(r['p_home'], 1-r['p_home']):.0%} | {winner} | {r['margin']} |")
     if cand:
         digest += ["", "## Tuning check (champion vs challengers)\n",
                    f"Each variant trained on all but the last {args.holdout} matches, then scored "
