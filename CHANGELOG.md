@@ -4,6 +4,27 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: the public demo archive is searchable by player (2026-09-14)
+
+`ktp-fastdl-indexes.py` writes `/demos/players.html`: search by name, `STEAM_0:`/`STEAM_1:`,
+bare `Y:Z` or SteamID64 to list every archived demo that player appears in, with
+`players.html#STEAM_0:Y:Z` as a per-player permalink. The demos index links to it.
+
+- One read-only `SELECT` per run against `hlstatsx.ktp_match_players` over the local
+  `mysql` client (auth_socket, explicit `--user`, 5s connect timeout, 20s overall).
+- Joined on the match id in the filename (`<epoch>-<SERVER>` or `1.3-<n>-<SERVER>`);
+  a second server token is the recording HLTV and is ignored. Queue placeholder ids
+  such as `1.3-confirm-NY2` never join, because they recur across unrelated matches.
+- The lookup is the only part of the run that touches a database, so it is the only
+  part allowed to go missing. A missing client, refused login, timeout, non-zero exit,
+  no usable row, or nothing joining prints one `WARNING: player index omitted: …`,
+  removes any earlier `players.html`, drops the link, and writes every other page as
+  before; the run still exits 0. Malformed rows are skipped and counted.
+- `--fastdl`, `--demos`, `--out-root` and `--db-timeout` exist so the generator can be
+  tested against a temp tree and dry-run on the data server without writing in place.
+- This deliberately makes the archive identity-bearing (operator ruling 2026-09-08:
+  a SteamID may be a public search key).
+
 ### `scripts`: match reports carry the in-game result and per-half player rows; `mean_depth` unit stated (2026-09-13)
 
 The public match report had to read its score from the website's `ktp.match`,
