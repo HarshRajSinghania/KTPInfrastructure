@@ -33,6 +33,8 @@ Moved out of the stack-root `CLAUDE.md` on 2026-07-27. The **plugin** bump check
   python3 scripts/ktp-wave-ledger.py status      # what is pending, and what has activated
   ```
 
+  🔑 **`reconcile` checks the RESTART, not the wave.** The 03:00 swap activates every staged `.new`, whoever staged it, so `reconcile` reads every pinned artifact and every staged `.new` on all 24 instances and keeps a wave open until the whole fleet agrees with `CLAUDE.md`, even when no wave is due. `ktp-wave-ledger.py sweep` is the same read without marking anything, and `systemd/ktp-wave-sweep.{service,timer}` runs it at 03:45 and 23:45 ET, so a stage that went around `stage-wave.py` still gets caught.
+
   Exit **1** means the row is stale (the fleet moved, the record did not). Exit **2** means it could not check — an unreadable `CLAUDE.md` or an unreachable fleet is never reported as a pass. `--no-fleet` checks the row against the recorded md5 alone and says so in its output; `--allow-unreconciled` on `stage-wave.py` overrides the gate, for a deliberate stack only.
   ⚠️ **If the wave did NOT activate cleanly, do not flip the row to clear the gate** — find the leftover `.new` first (`ktp-verify-post-swap.sh`). A gate satisfied by a wrong edit is worse than one that blocked.
   📌 The ledger lives at `$KTP_WAVE_LEDGER_DIR` (default `~/.ktp/waves`), outside this public repo; `$KTP_CLAUDE_MD` points at the root `CLAUDE.md` if it is not one level above the checkout.
