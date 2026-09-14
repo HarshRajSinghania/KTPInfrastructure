@@ -1697,7 +1697,7 @@ File consistency validation — catches modified player models, amplified sounds
 |------|----------|---------|
 | Player models | `axis-inf.mdl`, `us-para.mdl` | Prevent bright/transparent textures |
 | Sounds | `pl_step*.wav`, `headshot1.wav` | Prevent amplified audio |
-| Weapon models | `v_grenade.mdl`, `p_mills.mdl` | Prevent model exploits |
+| Weapon models | `p_mills.mdl`, `w_stick.mdl` | Prevent model exploits |
 | Sprites | `crosshairs.spr` | Optional, usually harmless |
 
 **Two validation modes via `fc_exactweapons`:** `1` enforces an exact file hash match (competitive default); `0` allows files with the same hitbox bounds (public servers). `fc_checkmodels` (added 2.3) toggles model checks independently.

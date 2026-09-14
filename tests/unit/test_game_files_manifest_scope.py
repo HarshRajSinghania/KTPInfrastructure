@@ -101,10 +101,19 @@ WEAPON_AND_EXPLICIT = [
     "models/p_k98.mdl", "models/w_98k.mdl",
     "models/allied_ammo.mdl", "models/axis_ammo.mdl",
     "models/helmet_us.mdl", "models/player.mdl",
-    "models/v_grenade.mdl", "models/v_mills.mdl", "models/v_stick.mdl",
 ]
 
-FILELIST = ["models/player/gerinf/gerinf.mdl", "sound/player/die1.wav"]
+# Held (p_) and thrown (w_) grenades are seen by other players; they stay enforced.
+GRENADE_WORLD_MODELS = [f"models/{kind}_{nade}.mdl"
+                        for kind in ("p", "w") for nade in ("grenade", "mills", "stick")]
+
+# First-person grenade viewmodels are allowed modification. The fixture offers them
+# through every route a path can enter by -- on disk, in a .res and in ktp_file.ini --
+# so restoring any one emit path for them fails the test.
+GRENADE_VIEWMODELS = ["models/v_grenade.mdl", "models/v_mills.mdl", "models/v_stick.mdl"]
+
+FILELIST = (["models/player/gerinf/gerinf.mdl", "sound/player/die1.wav"]
+            + GRENADE_WORLD_MODELS + GRENADE_VIEWMODELS)
 
 
 @pytest.fixture
@@ -117,7 +126,7 @@ def built(mod, tmp_path):
 
     every = RES_REFERENCED + WEAPON_AND_EXPLICIT + FILELIST
     files = {p: f"bytes-of-{p}" for p in every}
-    ssh = FakeSSH({"dod_kraftstoff": RES_REFERENCED}, files)
+    ssh = FakeSSH({"dod_kraftstoff": RES_REFERENCED + GRENADE_VIEWMODELS}, files)
     return mod.build_manifest(ssh, DOD, str(ini))
 
 
@@ -142,12 +151,38 @@ def test_review_severity_is_confined_to_skyboxes(built):
 
 
 def test_everything_else_still_violates(built):
-    for path in WEAPON_AND_EXPLICIT + FILELIST + ["models/mapmodels/barrel.mdl",
+    enforced_filelist = [p for p in FILELIST if p not in GRENADE_VIEWMODELS]
+    for path in WEAPON_AND_EXPLICIT + enforced_filelist + ["models/mapmodels/barrel.mdl",
                                                   "sprites/mapsprites/flame.spr",
                                                   "dod_siena.wad"]:
         entry = _by_path(built).get(path)
         assert entry is not None, f"{path} dropped out of the manifest"
         assert entry["severity"] == "violation", f"{path} must still count toward a verdict"
+
+
+def test_grenade_viewmodels_are_not_in_the_manifest(built):
+    # Absent, not downgraded: the client treats any severity other than "review" as a
+    # violation, and "review" copies the player's file into the bundle.
+    present = [p for p in GRENADE_VIEWMODELS if p in _by_path(built)]
+    assert not present, (
+        f"first-person grenade viewmodels are allowed modification; these came back: {present}"
+    )
+
+
+def test_held_and_thrown_grenade_models_still_violate(built):
+    got = _by_path(built)
+    for path in GRENADE_WORLD_MODELS:
+        entry = got.get(path)
+        assert entry is not None, f"{path} dropped out -- only the v_ viewmodels were released"
+        assert entry["category"] == "grenade_model", path
+        assert entry["severity"] == "violation", f"{path} is seen by other players and must still flag"
+
+
+def test_no_alternate_hash_targets_an_excluded_path(mod):
+    # An alternate for a path the manifest never emits is inert, and the AC client's
+    # KnownBenignFileVariants is kept in sync with this table.
+    stale = sorted(set(mod.ALTERNATE_HASHES) & set(mod.EXCLUDED_EXACT))
+    assert not stale, f"ALTERNATE_HASHES entries for excluded paths: {stale}"
 
 
 def test_the_other_cosmetic_buckets_stayed_excluded(built):

@@ -32,6 +32,30 @@ pinned on 2026-09-13 with `/etc/default/grub.d/99-ktp-kernel-flavour.cfg`
 - Deploy: nothing to pull. Chicago still needs the pin, once console access is confirmed. Denver
   has no generic kernel installed.
 
+### `scripts`: first-person grenade viewmodels leave the AC game-files manifest (2026-09-13)
+
+Operator ruling 2026-09-13, "allowable to be modified (for now)":
+`models/v_grenade.mdl`, `v_mills.mdl` and `v_stick.mdl` only change what a
+player sees in their own hands, so a modified copy is no longer a violation.
+The held (`p_`) and thrown (`w_`) grenade models are seen by other players
+and stay enforced.
+
+- `build-game-files-manifest.py` puts the three viewmodels in
+  `EXCLUDED_EXACT` and applies that set to `ktp_file.ini` as well as `.res`
+  references. Their explicit emit block and their two `ALTERNATE_HASHES`
+  entries are gone. They are excluded outright rather than downgraded,
+  because the client treats every severity except `review` as a violation,
+  and `review` copies the player's file into the session bundle.
+- The note that the viewmodels were in scope "to match ktp_file.ini" was
+  stale: KTPFileChecker dropped them from `ktp_file.ini` in `1bf59f6`.
+- `test_game_files_manifest_scope.py` offers the viewmodels through every
+  source and asserts they stay out, and that all six `p_`/`w_` grenade
+  models are still `grenade_model` violations.
+- Deploy: regenerate and install `/opt/ktp-ac-api/game_files_manifest.json`
+  (operator). KTPAntiCheat's `KnownBenignFileVariants` still lists
+  `v_grenade`/`v_stick`; its `Manifest=required` sync test will name them
+  as untracked until they are removed there.
+
 ### `scripts`: `report_service generate` reports a match only once every half has closed (2026-09-13)
 
 `ktp_matches` holds one row per half, and discovery tested `end_time` per row,

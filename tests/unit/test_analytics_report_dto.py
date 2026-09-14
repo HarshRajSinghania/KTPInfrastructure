@@ -228,6 +228,46 @@ class Sanitize(unittest.TestCase):
         r = sanitize_report(rpt)["ratings"]["ktpr_v2"]
         self.assertEqual(r["players"][0]["rating"], 50.0)
 
+    def test_published_display_scale_describes_the_published_numbers(self):
+        """The advertised scale must reproduce what we actually publish.
+
+        Not decoration: keep-the-prac #679/#691 read `parameters`
+        ("normalization": "per_match_z_scores" -- the MODEL's setting) as
+        describing `rating`, applied a second z-score transform on top, and
+        flattened every player on every match page to exactly 100.0. This
+        pins the advertised numbers to the real transform so the two cannot
+        drift apart again.
+        """
+        rpt = internal_report()
+        rpt["shadow_explorations"]["ktpr_v2"]["players"][0]["rating"] = 1.5
+        k = sanitize_report(rpt)["ratings"]["ktpr_v2"]
+        scale = k["display_scale"]["rating"]
+
+        self.assertEqual(scale["kind"], "floored_index")
+        rebuilt = max(scale["floor"],
+                      scale["center"] + scale["per_z"] * 1.5)
+        self.assertEqual(k["players"][0]["rating"], round(rebuilt, 2))
+
+        # The floor must be advertised accurately too.
+        rpt["shadow_explorations"]["ktpr_v2"]["players"][0]["rating"] = -9.0
+        floored = sanitize_report(rpt)["ratings"]["ktpr_v2"]["players"][0]
+        self.assertEqual(floored["rating"], scale["floor"])
+
+    def test_components_are_published_raw_and_say_so(self):
+        """Components are the opposite of rating and must stay that way.
+
+        They ship as raw z-scores so a consumer can rescale them itself; the
+        website maps them through its own curve. If they were ever pre-scaled
+        here, that curve would saturate them exactly as it did the rating.
+        """
+        rpt = internal_report()
+        rpt["shadow_explorations"]["ktpr_v2"]["players"][0]["components"] = {
+            "swing": -1.25, "output": 0.5}
+        k = sanitize_report(rpt)["ratings"]["ktpr_v2"]
+        self.assertEqual(k["display_scale"]["components"]["kind"], "raw_z_score")
+        self.assertEqual(k["players"][0]["components"]["swing"], -1.25)
+        self.assertEqual(k["players"][0]["components"]["output"], 0.5)
+
     def test_accumulation_unavailable_when_not_scored(self):
         acc = sanitize_report(internal_report())["ratings"]["accumulation"]
         self.assertEqual(acc, {"status": "unavailable", "players": []})
