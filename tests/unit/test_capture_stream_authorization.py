@@ -4,6 +4,7 @@ Pure Python -- no database -- so it runs in the required config-tests check.
 """
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 
@@ -199,3 +200,95 @@ def test_position_provenance_rides_on_the_position_stream_alone():
         {1}, manifests, health, positions)
 
     assert result["authorized"] is True
+
+
+def _pre_change_verdict(observed, manifests, health):
+    """The match-level rule exactly as it stood before the per-stream split.
+
+    Frozen by definition -- it is history, not a second implementation to keep
+    in step. It exists so the "consumers that read `authorized` are unaffected"
+    claim is held by a test rather than by an argument.
+    """
+    if not manifests and not health:
+        return False
+    errors = []
+    manifest_halves = [int(row.get("half") or 0) for row in manifests]
+    health_halves = {int(row.get("half") or 0) for row in health}
+    if set(manifest_halves) != observed or len(manifest_halves) != len(observed):
+        errors.append(1)
+    if health_halves != observed:
+        errors.append(1)
+    for row in manifests:
+        capabilities = {item.strip() for item
+                        in str(row.get("capabilities") or "").split(",") if item.strip()}
+        if (int(row.get("schema_version") or 0) not in {22, 23, 24}
+                or abs(float(row.get("position_interval") or 0) - 2.0) > 0.01
+                or not {"objective_attempt", "grenade_entity"}.issubset(capabilities)):
+            errors.append(1)
+    required = set(analytics.CAPTURE_EVENT_TYPES)
+    optional = set(analytics.CAPTURE_EVENT_TYPES_OPTIONAL)
+    for half in sorted(observed):
+        rows = [row for row in health if int(row.get("half") or 0) == half]
+        types = [str(row.get("event_type") or "") for row in rows]
+        seen = set(types)
+        if required - seen or seen - required - optional or len(types) != len(seen):
+            errors.append(1)
+        for row in rows:
+            counters = {key: int(row.get(key) or 0) for key in (
+                "attempted", "enqueued", "dropped", "emitted", "daemon_received",
+                "daemon_accepted", "daemon_rejected", "correlation_failure_count",
+                "sequence_gap_count", "duplicate_or_reordered_count")}
+            if (min(counters.values()) < 0
+                    or counters["attempted"] != counters["enqueued"] + counters["dropped"]
+                    or counters["enqueued"] != counters["emitted"]
+                    or counters["emitted"] != counters["daemon_received"]
+                    or counters["daemon_accepted"] + counters["daemon_rejected"]
+                    != counters["daemon_received"]
+                    or any(counters[key] for key in (
+                        "dropped", "daemon_rejected", "correlation_failure_count",
+                        "sequence_gap_count", "duplicate_or_reordered_count"))):
+                errors.append(1)
+    return not errors and bool(observed)
+
+
+def _random_evidence(rng):
+    halves = rng.choice([{1}, {1, 2}])
+    manifests = [{
+        "half": half, "schema_version": rng.choice([22, 23, 24, 21]),
+        "capabilities": CAPABILITIES,
+        "position_interval": rng.choice([2.0, 2.0, 2.0, 1.0]),
+    } for half in sorted(halves)]
+    if rng.random() < 0.1:
+        manifests = manifests[:1]
+    health = []
+    for half in sorted(halves):
+        gap = rng.choice([0, 0, 0, 0, 1, 3])
+        duplicates = rng.choice([0, 0, 0, 0, 1])
+        for event_type in analytics.CAPTURE_EVENT_TYPES:
+            emitted = rng.randint(0, 5)
+            lost = rng.choice([0, 0, 0, 0, 1]) if emitted else 0
+            dropped = rng.choice([0, 0, 0, 0, 1])
+            rejected = rng.choice([0, 0, 0, 0, 1]) if emitted - lost else 0
+            health.append({
+                "half": half, "event_type": event_type,
+                "attempted": emitted + dropped, "enqueued": emitted,
+                "dropped": dropped, "emitted": emitted,
+                "daemon_received": emitted - lost,
+                "daemon_accepted": emitted - lost - rejected,
+                "daemon_rejected": rejected,
+                "correlation_failure_count": rng.choice([0, 0, 0, 0, 1]),
+                "sequence_gap_count": gap,
+                "duplicate_or_reordered_count": duplicates,
+            })
+        if rng.random() < 0.05:
+            health.pop()
+    return halves, manifests, health
+
+
+def test_match_level_authorized_still_means_what_it_meant():
+    """Consumers reading `authorized` must see no change, in either direction."""
+    rng = random.Random(7)
+    for _ in range(4000):
+        halves, manifests, health = _random_evidence(rng)
+        result = analytics.evaluate_capture_authorization(halves, manifests, health)
+        assert result["authorized"] is _pre_change_verdict(halves, manifests, health)
