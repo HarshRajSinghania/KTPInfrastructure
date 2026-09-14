@@ -21,6 +21,21 @@ Captured read-only on 2026-09-13 and committed byte-identical, so each installed
 - `docs/LIVE_SCRIPT_INVENTORY.md`: those rows now read MATCH with full md5s; Atlanta and Dallas `rc.local` added.
 - Deploy: nothing changes on any host. The installed copies still need manifest rows (see the PR).
 
+### `scripts/report_sync`: revalidate the site's match-report cache after a sync (2026-09-14)
+
+A synced `ktp.match_report` row sat behind the site's `cacheLife("hours")` read
+with nothing to tell it the data changed, so `/stats/matches` could take up to
+about an hour longer than the pipeline itself to show a finished match.
+
+- After a run that POSTs at least one new row, `report_sync.revalidate_site()`
+  POSTs `{"scope": "ktp"}` to `https://ktpleague.gg/api/internal/revalidate`
+  (header `x-internal-revalidate`), the narrowest of the endpoint's four
+  POST-able scopes whose tag list carries `MATCH_REPORTS_TAG`.
+- Reads its secret from `KTP_SITE_REVALIDATE_SECRET` at run time; unset logs
+  one warning and skips. One retry on a transient failure (5xx, timeout); a
+  4xx is not retried. Never raises, never changes the run's exit status, and
+  never runs on `--dry-run` or when nothing changed.
+
 ### `scripts`: match reports carry the in-game result and per-half player rows; `mean_depth` unit stated (2026-09-13)
 
 The public match report had to read its score from the website's `ktp.match`,
