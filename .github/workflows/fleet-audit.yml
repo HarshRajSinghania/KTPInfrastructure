@@ -25,6 +25,15 @@
 # So: the job with fleet credentials runs no model, and the job that runs a model
 # has no credentials. Neither half can do the other's damage.
 #
+# THE HOLE IN THAT SPLIT, AND WHAT CLOSES IT
+# This repository is PUBLIC, so the issue body AND the run artifacts below are
+# world-readable, and the snapshot captures root's crontab and /etc/rc.local
+# verbatim. A credential ever written into a cron line would publish itself on
+# the first run, and a published artifact cannot be unpublished. So the collect
+# job redacts by shape where the fleet's text enters the process -- not on the
+# report alone, which would still upload the value in the artifact. See
+# scripts/audit_redact.py for the property it guarantees.
+#
 # TRIGGERS ARE DELIBERATELY NARROW
 # The self-hosted runner executes as root on the data server and can reach all
 # five game hosts. `pull_request` must never appear in this file -- a fork PR

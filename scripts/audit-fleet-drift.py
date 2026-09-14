@@ -17,6 +17,10 @@ Design notes:
 - A "fact" is (section, key, value) where key is "line content before =" for
   key=value sections, or the line itself for list-only sections (GRUB cmdline,
   CPU idle states, etc.).
+- Every host's snapshot is redacted by shape the moment it lands (see
+  scripts/audit_redact.py). This report is published to a public GitHub issue
+  by .github/workflows/fleet-audit.yml and written 0644 to /var/log, and it
+  captures root's crontab and /etc/rc.local verbatim.
 - IGNORED_KEYS covers things expected to differ per-host (IP, UUID, iface name).
 - Chicago VPS is flagged separately because its topology differs from baremetals
   (no isolcpus, different kernel params, etc.) — drift within the baremetal
@@ -60,6 +64,12 @@ from datetime import datetime
 from pathlib import Path
 
 import paramiko
+
+# Loaded by absolute path: pytest and the `--state` cron both reach this file
+# without scripts/ on sys.path, and a silent ImportError here would publish the
+# unredacted report.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from audit_redact import redact_diagnostic, redact_snapshot  # noqa: E402
 
 # The report is UTF-8 whatever the console's codepage is. reconfigure() in
 # preference to a fresh TextIOWrapper: wrapping .buffer leaves the old wrapper
@@ -231,6 +241,17 @@ LIST_SECTIONS = {
 }
 
 
+def snapshot_payload(out, err):
+    """Everything run_snapshot hands back, redacted.
+
+    This is the only door the fleet's raw text comes through, which is why the
+    redaction sits here rather than at the report writer: the report is one of
+    four things built from this text (report, Discord delta, state file, the
+    CI artifact), and redacting the report alone would still publish the rest.
+    """
+    return redact_snapshot(out), (redact_diagnostic(err).strip() or None)
+
+
 def run_snapshot(host_info):
     """Run the snapshot script on one host, return (name, snapshot_text, error)."""
     ssh = paramiko.SSHClient()
@@ -266,15 +287,16 @@ def run_snapshot(host_info):
             f'bash /tmp/_ktp_monitor_check.sh',
             timeout=120)
         out = stdout.read().decode(errors='replace')
-        err = stderr.read().decode(errors='replace').strip()
+        err = stderr.read().decode(errors='replace')
         ssh.close()
-        return host_info['name'], out, err or None
+        return (host_info['name'],) + snapshot_payload(out, err)
     except Exception as e:
         try:
             ssh.close()
         except Exception:
             pass
-        return host_info['name'], '', f'SSH/snapshot failed: {e}'
+        return (host_info['name'], '',
+                f'SSH/snapshot failed: {redact_diagnostic(str(e))}')
 
 
 def parse_snapshot(text):
@@ -601,7 +623,9 @@ def render_report(host_snapshots, errors, include_ignored=False):
     out.append(f'# KTP Fleet Drift Audit — {datetime.now().strftime("%Y-%m-%d %H:%M ET")}')
     out.append('')
     for h in HOSTS:
-        out.append(f'- **{h["name"]}** ({h["host"]}) [{h["group"]}]')
+        # No address. The report is published to a public GitHub issue and a
+        # world-readable artifact, and where a host lives is not a drift fact.
+        out.append(f'- **{h["name"]}** [{h["group"]}]')
     out.append('')
 
     if errors:
