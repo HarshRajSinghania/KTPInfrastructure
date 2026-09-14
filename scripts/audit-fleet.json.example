@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to /etc/ktp/audit-fleet.json (mode 600, root-owned) or point KTP_AUDIT_FLEET_CONFIG at your own location. Do NOT commit the real file — it contains SSH credentials. See scripts/audit-fleet-drift.py for the schema.",
+  "_comment": "Copy to /etc/ktp/audit-fleet.json (mode 600, root-owned) or point KTP_AUDIT_FLEET_CONFIG at your own location. Do NOT commit the real file — it contains SSH credentials. See scripts/audit-fleet-drift.py for the schema. `ports` (added for scripts/verify-veto-week-maps.py) lists every instance on the host — that script checks per-instance map presence, not just the `sample_port` audit-fleet-drift.py samples. Chicago runs 4 instances, not 5 — its 5th (27019) was deleted 2026-07-13.",
 
   "hosts": [
     {
@@ -8,7 +8,8 @@
       "user": "dodserver",
       "password": "__CHANGE_ME__",
       "group": "baremetal",
-      "sample_port": 27015
+      "sample_port": 27015,
+      "ports": [27015, 27016, 27017, 27018, 27019]
     },
     {
       "name": "Dallas",
@@ -16,7 +17,8 @@
       "user": "dodserver",
       "password": "__CHANGE_ME__",
       "group": "baremetal",
-      "sample_port": 27015
+      "sample_port": 27015,
+      "ports": [27015, 27016, 27017, 27018, 27019]
     },
     {
       "name": "Denver",
@@ -24,7 +26,8 @@
       "user": "dodserver",
       "password": "__CHANGE_ME__",
       "group": "baremetal",
-      "sample_port": 27015
+      "sample_port": 27015,
+      "ports": [27015, 27016, 27017, 27018, 27019]
     },
     {
       "name": "NewYork",
@@ -32,7 +35,8 @@
       "user": "dodserver",
       "password": "__CHANGE_ME__",
       "group": "baremetal",
-      "sample_port": 27015
+      "sample_port": 27015,
+      "ports": [27015, 27016, 27017, 27018, 27019]
     },
     {
       "name": "Chicago",
@@ -40,7 +44,8 @@
       "user": "dodserver",
       "password": "__CHANGE_ME__",
       "group": "vps",
-      "sample_port": 27015
+      "sample_port": 27015,
+      "ports": [27015, 27016, 27017, 27018]
     }
   ],
 
