@@ -4,6 +4,33 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`, `systemd`: the wave ledger reconciles the restart, not the stage call (2026-09-14)
+
+`ktp-wave-ledger.py reconcile` read only the artifacts a wave named, so a restart
+that activated more than the ledger held reported "reconciled". The 2026-09-08
+03:00 swap activated `stats_logging.amxx` and `ktp_cvar.amxx` 7.38 with only
+`stats_logging` in the ledger, and the 2026-09-10 `ktp_cvar` 7.39 stage never
+entered the ledger at all, so reconcile had nothing to say about it.
+
+- `reconcile` now reads every pinned artifact and every staged `.new` on every
+  instance, once, even when no wave is due, and leaves a wave open until the
+  whole fleet agrees with `CLAUDE.md`. Findings: `UNLEDGERED_LIVE`,
+  `LIVE_NOT_ON_ROW`, `ROW_NOT_LIVE` (the row's first md5 is on no instance),
+  `NOT_UNIFORM` (partial activation) and `STAGED_UNLEDGERED` (a `.new` in no
+  pending wave; it fails the run but does not hold an activated wave open).
+- New `sweep` subcommand: the same read, marks nothing, for a timer. Exit 0
+  clean, 1 finding, 2 could not look (unreachable instance, unreadable
+  `CLAUDE.md`, no ledger without `--no-ledger`).
+- `systemd/ktp-wave-sweep.{service,timer}`: 03:45 ET after the swap and 23:45 ET
+  before it, `OnFailure=` alerting. Not installed.
+- The three KTPAMXX artifacts now match their own rows (`KTPAMXX core`,
+  `KTPAMXX dodx`, `stats_logging.amxx`). Against the current table they had
+  fallen back to a file-wide md5 search.
+- KTPFileChecker is `ktp_file.amxx` on the fleet, not `KTPFileChecker.amxx`.
+  The first live sweep reported the row's md5 absent on all 24; `md5sum` finds
+  it in `plugins/ktp_file.amxx`.
+- Game instances only. The data server's artifacts are not swept.
+
 ### `scripts`, `docs`: a failed unit's output survives journald rotation (2026-09-14)
 
 `ktp-identity-reconcile.service` failed on 2026-09-08 carrying a real finding —
@@ -623,7 +650,6 @@ shipped script over both cases: a plugin that compiles exits 0 and reports
 `Compilation Complete`; a plugin that does not exits 1 and reports
 `PLUGIN BUILD FAILED: <names>`.
 
-
 ### `scripts`: capture-health type checks no longer break on a newer producer (2026-09-10)
 
 Two places compared the set of per-half health streams against
@@ -652,7 +678,6 @@ squarely on the wave-0 canary it was meant to validate.
 
 This is the same exact-equality trap as the schema-version gates fixed
 earlier today, in a different guise.
-
 
 ### `config` + `scripts`: spawn ownership now comes from the maps, not from play (2026-09-10)
 
@@ -696,7 +721,6 @@ authored value, and the only thing that means "who owns this at spawn".
 
 `config/analytics/map_spawn_ownership.json` carries the full audit record for
 all 17 pool maps, including the neutral ones the TOML deliberately omits.
-
 
 ### Lane B + analytics: shot-context stream coverage, and a schema-24 drift fix (2026-09-10)
 
@@ -919,7 +943,6 @@ KTPHLStatsX's `dod_client_weapon_fire` / `ktp_shot_events` change (schema
   into a pending wave is stale again at the next 03:00.
 - `docs/RELEASE_CHECKLISTS.md` gains the § *Tier-2 runner re-sync* section, including what the tool does
   **not** cover and therefore still needs a per-wave look: test-mode plugins, KTPHudObserver, and configs.
-
 
 ### `ops`: loud swap failures, and a two-marker Tier 2 heartbeat (2026-08-26)
 

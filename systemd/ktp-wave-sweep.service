@@ -1,0 +1,18 @@
+[Unit]
+Description=KTP wave sweep (live fleet md5s against CLAUDE.md version rows and the wave ledger)
+Documentation=https://github.com/afraznein/KTPInfrastructure/blob/main/docs/RELEASE_CHECKLISTS.md
+After=network-online.target
+Wants=network-online.target
+# Exit 1 is a finding and exit 2 is a sweep that could not look; both fail the unit, so both alert.
+OnFailure=ktp-systemd-alert@%n.service
+
+[Service]
+Type=oneshot
+# Must be a checkout of main: an older ledger script has no `sweep` and exits 2 on the unknown command.
+WorkingDirectory=/opt/ktp-infra
+# KTP_CLAUDE_MD, KTP_WAVE_LEDGER_DIR, and KTP_FLEET_SSH_PASSWORD unless ~/.ktp_fleet_ssh_password exists.
+EnvironmentFile=/etc/ktp/wave-sweep.env
+ExecStart=/usr/bin/python3 scripts/ktp-wave-ledger.py sweep
+TimeoutStartSec=600
+Nice=10
+NoNewPrivileges=true
