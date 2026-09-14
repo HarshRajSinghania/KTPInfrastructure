@@ -31,6 +31,33 @@ entered the ledger at all, so reconcile had nothing to say about it.
   it in `plugins/ktp_file.amxx`.
 - Game instances only. The data server's artifacts are not swept.
 
+### `lane-b`: apply the migrations the KTPHLStatsX ref under test carries (2026-09-14)
+
+Lane B extracted a fixed migration list out of the KTPHLStatsX commit under
+test, so every `main`-based KTPHLStatsX PR, and this repo's post-merge
+`lane-b-corpus-main` run, failed at the build step with
+`sql/migrate_028_shot_events_dedup.sql not found`: 028 onward exist only on
+KTPHLStatsX `preprod`.
+
+- `ArtifactSet.collect` lists the daemon commit's `sql/migrate_*.sql` and skips
+  any `DEFAULT_SCHEMA_FILES` migration newer than the ref, printing a
+  `::warning::` per skipped file and recording `schema_applied` /
+  `schema_skipped` in the manifest.
+- Still fatal: a gap (the ref carries a migration but not one that applies
+  before it); a carried migration with no apply position in
+  `DEFAULT_SCHEMA_FILES` and no reason in `NOT_APPLIED_MIGRATIONS`; a missing
+  `ktp_schema.sql`, `hlstats.pl` or seed.
+- The builder writes the applied migrations to `artifacts/schema-migrations.txt`
+  and both `--schema` blocks in `lane-b-stats-e2e.yml` expand it, so
+  `DEFAULT_SCHEMA_FILES` is the only list. The drift guard now fails if a
+  literal migration path returns to the workflow.
+- Adding a KTPHLStatsX migration: register it here first. Refs without it skip
+  it; the PR that adds it then applies it.
+- KTPHLStatsX's required check runs this workflow's YAML at a pinned sha but
+  takes `tests/` and `scripts/` from this repo's `preprod`, so it picks up the
+  builder change once `reconcile-preprod` fast-forwards `preprod`. The YAML
+  half reaches that check only when the pin moves.
+
 ### `scripts/report_sync`: revalidate the site's match-report cache after a sync (2026-09-14)
 
 A synced `ktp.match_report` row sat behind the site's `cacheLife("hours")` read
