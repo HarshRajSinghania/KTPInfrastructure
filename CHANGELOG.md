@@ -47,6 +47,38 @@ is not new — `gfx/env/*` has shipped at it since 2026-08-27.
   changes three `severity` fields to `review` and removes two
   `allowed_alternate_hashes` lists — nothing else.
 
+### `scripts`, `sql`, `config`: match reports carry kill streaks, per-side weapon and duel splits, and per-class rows (2026-09-14)
+
+Builds items 1-5 of `docs/proposals/streaks-and-side-splits.md`. Report schema
+10 -> 11, website contract `analytics-report-dto-v1.1.0` -> `v1.2.0` (additive;
+a report built before schema 11 reads `status: unavailable`, flag
+`not-in-report`, never zero).
+
+- `player_halves.rows[]` gains `side` (the side the player held that half, from
+  the life ledger) and `best_streak`. Cap breaks take `producer_half` when the
+  archive carries it, instead of placement by event time.
+- `kill_streaks` (`kill_streak_v1`, `scripts/kill_streaks.py`): best run of
+  enemy kills between the player's own life ends, per half, per match
+  (`players[]`) and per side (`players[].by_side`). Own teamkills neither count
+  nor reset; a grenade landing after the thrower died counts toward the fresh
+  counter; a frag with no producer clock takes the victim's death time when one
+  unclaimed death boundary lies within 2 s, otherwise its row is `lower_bound`.
+  Never the stock hlstatsx `kill_streak_N` actions. `players[].best_streak` is
+  the match value.
+- `weapon_sides` (`sql/analytics/weapon_half_fact.sql`): kills, headshot kills,
+  shots, hits and damage per player per half per weapon, under the player's
+  side, so picked-up enemy weapons stay on the player's side. `reconciled` says
+  whether the rows sum back to `weapons[]`.
+- `duels_by_side`: `duels[]` split by the killer's side, with `reconciled`.
+- `player_classes`: lives, kills, deaths and headshot kills per class id read at
+  spawn, labelled from `config/analytics/dod_classes.toml` (pinned against
+  hlstatsx `killerRole` by a test). No accuracy per class: shots have no class
+  or time at the source.
+- Not built: clutches (naming ruling pending) and momentum per side (profile
+  is still DRAFT).
+- Deploy regenerates every in-season match at schema 11 on the next tick, and
+  report_sync inserts them as new rows (the site reads the highest id).
+
 ### `lane-b`: apply the migrations the KTPHLStatsX ref under test carries (2026-09-14)
 
 Lane B extracted a fixed migration list out of the KTPHLStatsX commit under
