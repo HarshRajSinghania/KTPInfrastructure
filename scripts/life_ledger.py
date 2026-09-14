@@ -8,7 +8,9 @@ sql/analytics/life_boundary_fact.sql and sql/analytics/frag_context_fact.sql.
   half resolve to None rather than to a guess.
 - A frag with no producer clock takes the game_time of the victim's own death
   boundary when exactly one unclaimed boundary lies within the recovery window
-  of its event_epoch. Otherwise it stays unordered.
+  of its epoch. Such frags usually carry no event_epoch either, only the
+  daemon's receipt time, which runs about a second behind the game server.
+  Otherwise the frag stays unordered.
 """
 from __future__ import annotations
 
@@ -120,7 +122,9 @@ def place_frags(
             "placement": "clocked" if at is not None and half is not None else "unordered",
             "headshot": bool(as_int(row.get("headshot"))),
             "weapon": row.get("weapon"),
-            "event_epoch": as_int(row.get("event_epoch")),
+            "event_epoch": (as_int(row.get("event_epoch"))
+                            if row.get("event_epoch") is not None
+                            else as_int(row.get("receipt_epoch"))),
             "event_id": as_int(row.get("event_id")) or 0,
         }
         if out["placement"] == "clocked" and out["victim_id"] is not None:

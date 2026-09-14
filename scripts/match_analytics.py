@@ -150,7 +150,7 @@ INTEGER_COLUMNS = {
     "player_slot", "engine_userid", "player_class", "round_live",
     "event_epoch", "producer_activation_epoch", "activation_receipt_epoch",
     "match_start_epoch", "start_epoch", "end_epoch",
-    "stored_half", "producer_half",
+    "stored_half", "producer_half", "receipt_epoch",
     "attempt_id", "producer_sequence", "entindex", "serial", "weapon_id",
     "owner_player_id", "owner_engine_userid", "allies_in_zone", "axis_in_zone",
 }

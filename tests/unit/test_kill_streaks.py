@@ -28,12 +28,16 @@ def life(half, pid, kind, reason, team, cls, t):
             "event_epoch": E0 + half * 10_000 + int(t)}
 
 
-def frag(half, killer, victim, t, weapon="kar", headshot=0, clocked=True, epoch_t=None):
+def frag(half, killer, victim, t, weapon="kar", headshot=0, clocked=True):
+    # An unclocked frag has no producer context at all: no event_epoch, only the
+    # daemon's receipt time, a second behind the game server.
+    epoch = E0 + half * 10_000 + int(t)
     return {"half": half if clocked else None, "stored_half": half,
             "producer_match_id": MATCH if clocked else None, "stored_match_id": MATCH,
             "killer_id": killer, "victim_id": victim, "weapon": weapon, "headshot": headshot,
             "game_time": float(t) if clocked else None,
-            "event_epoch": E0 + half * 10_000 + int(epoch_t if epoch_t is not None else t)}
+            "event_epoch": epoch if clocked else None,
+            "receipt_epoch": epoch + 1}
 
 
 # Half 1: p1/p2 play Axis (ledger team 2), p3/p4 Allies. Half 2 swaps.
@@ -90,7 +94,7 @@ def observer_stream():
     add(1, -5, "kill", killer_id="u3", victim_id="u1", kill_type="normal")
     add(1, 0, "match_phase", phase="golive")
     for f in FRAGS:
-        t = f["game_time"] if f["game_time"] is not None else f["event_epoch"] - E0 - f["stored_half"] * 10_000
+        t = f["game_time"] if f["game_time"] is not None else f["receipt_epoch"] - 1 - E0 - f["stored_half"] * 10_000
         add(f["stored_half"], t, "kill", killer_id=f"u{f['killer_id']}",
             victim_id=f"u{f['victim_id']}", kill_type="normal")
     add(1, 20, "kill", killer_id="u1", victim_id="u2", kill_type="teamkill")
@@ -185,10 +189,16 @@ class KillStreakDefinition(unittest.TestCase):
         self.assertEqual(dict(streak_kills), dict(per_player))
 
     def test_recovery_ignores_a_non_death_boundary_in_window(self):
-        placed = {(f["killer_id"], f["victim_id"], f["event_epoch"]): f["placement"]
+        placed = {(f["half"], f["killer_id"], f["victim_id"]): f["placement"]
                   for f in place_frags(FRAGS, LIVES, match_id=MATCH)}
-        self.assertEqual(placed[(2, 3, E0 + 10_000 + 100)], "recovered")
-        self.assertEqual(placed[(2, 4, E0 + 10_000 + 110)], "unordered")
+        self.assertEqual(placed[(1, 2, 3)], "recovered")
+        self.assertEqual(placed[(1, 2, 4)], "unordered")
+
+    def test_an_unclocked_frag_with_no_epoch_at_all_stays_unordered(self):
+        bare = [dict(f, receipt_epoch=None) if f["game_time"] is None else f for f in FRAGS]
+        placements = [f["placement"] for f in place_frags(bare, LIVES, match_id=MATCH)]
+        self.assertEqual(placements.count("recovered"), 0)
+        self.assertEqual(placements.count("unordered"), 2)
 
     def test_sides_resolve_per_half_and_refuse_two_sides(self):
         sides = resolve_sides(LIVES + [life(2, 4, "start", "spawn", 1, 1, 60)])
