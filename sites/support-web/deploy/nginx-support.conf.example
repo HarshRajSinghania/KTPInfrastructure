@@ -1,3 +1,10 @@
+# RETIRED 2026-09-14 — support.ktpdod.com is no longer live; its sites-enabled
+# entry and docroot were removed from the data server. Kept only as a record of
+# the old architecture (nginx serving public.json as a static file from the
+# docroot). The poller now writes to /var/lib/support-web/public.json and
+# pushes it straight to ktpleague.gg (see SUPPORT_PUSH_URL in run_poller.py);
+# nothing serves this vhost's paths anymore, so do not deploy this file as-is.
+#
 # support.ktpdod.com
 #
 # server_name is support.ktpdod.com and NOTHING ELSE. Do not add ktpdod.com or

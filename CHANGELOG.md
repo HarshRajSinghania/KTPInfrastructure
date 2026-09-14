@@ -25,6 +25,181 @@ bare `Y:Z` or SteamID64 to list every archived demo that player appears in, with
 - This deliberately makes the archive identity-bearing (operator ruling 2026-09-08:
   a SteamID may be a public search key).
 
+### `support-web`/`support-poller`: default `public.json` path no longer names the deleted docroot (2026-09-14)
+
+`PUBLIC_DEFAULT`/`public_json` in both `run_poller.py` copies and `app/config.py`,
+plus `support-web.env.example`, still named `/var/www/support.ktpdod.com/status/public.json`
+after that vhost's docroot was removed. `support-poller.service` loads
+`/etc/ktp/support-web.env` with `EnvironmentFile=-…` (leading `-` ignores a
+missing file), so if that env file ever vanished the poller would have silently
+re-targeted the deleted path. The live `/opt/support-web` copies were already
+corrected 2026-09-14 (no restart); this brings the repo default in line.
+
+- Defaults now read `/var/lib/support-web/public.json` in
+  `services/support-poller/tools/run_poller.py`, `sites/support-web/tools/run_poller.py`,
+  `sites/support-web/app/config.py`, and `sites/support-web/deploy/support-web.env.example`.
+- `sites/support-web/deploy/nginx-support.conf.example` is marked RETIRED — the
+  `support.ktpdod.com` vhost's `sites-enabled` entry and docroot are gone from
+  the data server, and delivery is now a direct push to ktpleague.gg rather than
+  nginx serving a static file, so the example is kept as a historical record only.
+- `tests/test_config.py`: added a case asserting the default never names
+  `support.ktpdod.com`.
+
+### `scripts`, `systemd`: the wave ledger reconciles the restart, not the stage call (2026-09-14)
+
+`ktp-wave-ledger.py reconcile` read only the artifacts a wave named, so a restart
+that activated more than the ledger held reported "reconciled". The 2026-09-08
+03:00 swap activated `stats_logging.amxx` and `ktp_cvar.amxx` 7.38 with only
+`stats_logging` in the ledger, and the 2026-09-10 `ktp_cvar` 7.39 stage never
+entered the ledger at all, so reconcile had nothing to say about it.
+
+- `reconcile` now reads every pinned artifact and every staged `.new` on every
+  instance, once, even when no wave is due, and leaves a wave open until the
+  whole fleet agrees with `CLAUDE.md`. Findings: `UNLEDGERED_LIVE`,
+  `LIVE_NOT_ON_ROW`, `ROW_NOT_LIVE` (the row's first md5 is on no instance),
+  `NOT_UNIFORM` (partial activation) and `STAGED_UNLEDGERED` (a `.new` in no
+  pending wave; it fails the run but does not hold an activated wave open).
+- New `sweep` subcommand: the same read, marks nothing, for a timer. Exit 0
+  clean, 1 finding, 2 could not look (unreachable instance, unreadable
+  `CLAUDE.md`, no ledger without `--no-ledger`).
+- `systemd/ktp-wave-sweep.{service,timer}`: 03:45 ET after the swap and 23:45 ET
+  before it, `OnFailure=` alerting. Not installed.
+- The three KTPAMXX artifacts now match their own rows (`KTPAMXX core`,
+  `KTPAMXX dodx`, `stats_logging.amxx`). Against the current table they had
+  fallen back to a file-wide md5 search.
+- KTPFileChecker is `ktp_file.amxx` on the fleet, not `KTPFileChecker.amxx`.
+  The first live sweep reported the row's md5 absent on all 24; `md5sum` finds
+  it in `plugins/ktp_file.amxx`.
+- Game instances only. The data server's artifacts are not swept.
+
+### `scripts`, `docs`: a failed unit's output survives journald rotation (2026-09-14)
+
+`ktp-identity-reconcile.service` failed on 2026-09-08 carrying a real finding —
+exit 1 is how it reports a registry/anti-cheat identity divergence — and six days
+later `journalctl -u ktp-identity-reconcile` returned `-- No entries --`.
+journald on the data server is capped at `SystemMaxUse=1G`, whose drop-in comment
+budgets "roughly 4 days at the measured ~230MB/day"; measured now, the journal
+spans about two days, so the write rate has roughly doubled and nothing reported
+that the window halved.
+
+For a unit whose stdout **is** its report, that is data loss rather than a lost
+trace. The findings were recovered from `/var/log/syslog.2.gz` — `ForwardToSyslog=yes`
+had left a second copy — but syslog is `rotate 4` with a `maxsize 1G` trigger that
+fires every couple of days on this box, so that copy expires about a week after
+the run. Discord is not an archive either: the embed is unsearchable, the
+per-unit cooldown drops repeats, and a relay outage loses it outright.
+
+Fixed once at the shared layer instead of per-unit, per `OBSERVABILITY_PLAN.md`
+(new checks become producers for an existing alerter, not new alerters):
+
+- `scripts/ktp-systemd-alert.py` appends every capture to
+  `/var/log/ktp-systemd-alert.log` — unit, result, exit code, sub-state,
+  is-active, restart count and the journal tail under a UTC-stamped header.
+  Written **before** the cooldown check and before the POST, so a suppressed
+  alert, a failed relay and a rotated journal each still leave the output on
+  disk. `append_alert_log()` swallows `OSError` and warns: losing the archive
+  must never lose the alert, which is the same fail-open rule the cooldown
+  writer already follows.
+- The journal capture goes from 25 lines to 400, and only the **last 25** reach
+  the embed — Discord's description cap is unchanged and so is the embed. A run
+  that reports many findings is exactly the run whose tail must not be clipped,
+  and that run is no longer the one that gets truncated.
+- `--alert-log` overrides the path, so the capture can be exercised without
+  writing to `/var/log`.
+- `scripts/ktp-systemd-alert.logrotate` → `/etc/logrotate.d/ktp-systemd-alert`.
+  Monthly, `rotate 12`, `maxsize 64M`, `delaycompress`, `create 0640 root root`,
+  copying the `ktp-disk-history.logrotate` stanza. Retention is deliberately long
+  — rotating this on journald's two-day horizon would rebuild the hole it fills.
+  Also adopts `/var/log/ktp-systemd-alert-failed.log`, the POST-failure sentinel,
+  which was unrotated.
+
+Not built: no freshness check on the new artifact. Alerting on work done needs a
+cadence to compare against, and this file is written only when something fails —
+so an mtime gate would read `stale` forever on a healthy estate, which is the
+`BANLIST_STALE_SEC` mistake `ktp-data-server-health.sh` already documents.
+
+Deploy: `install -m 0755 scripts/ktp-systemd-alert.py /usr/local/bin/ktp-systemd-alert`
+and `install -m 0644 scripts/ktp-systemd-alert.logrotate /etc/logrotate.d/ktp-systemd-alert`,
+then `logrotate -d /etc/logrotate.d/ktp-systemd-alert` to confirm it is not
+skipped — `/var/log` is group-writable here, and a stanza logrotate refuses is
+silent (see `scripts/README-hltv-connection-logging.md`). No unit change, no
+`daemon-reload`, no restart.
+
+### `scripts`: grenade viewmodels return to the manifest at severity `review` (2026-09-13)
+
+The 2026-09-13 ruling was revised the same day. `models/v_grenade.mdl`,
+`v_mills.mdl` and `v_stick.mdl` stay allowed at any hash and must never be
+scored — but a modified copy has to reach an admin again, and excluding them
+could not do that. The client hashes only the paths the manifest lists, so an
+excluded path is unobservable rather than forgiven: no comparison, no capture,
+nothing in the bundle. `review` is the severity that separates the two, and it
+is not new — `gfx/env/*` has shipped at it since 2026-08-27.
+
+- `build-game-files-manifest.py` takes the three out of `EXCLUDED_EXACT` and
+  into a new `REVIEW_EXACT`, which `severity_for` consults beside
+  `REVIEW_PATH_PREFIXES`. `models/` cannot be a prefix rule without releasing
+  the weapon kit, so the set is matched whole. Their explicit emit block comes
+  back unchanged.
+- **Operator ruling 2026-09-14: the two `ALTERNATE_HASHES` entries for
+  `v_grenade` and `v_stick` are REMOVED, so every modified copy is captured —
+  the known community pack included.** An `AllowedAlternateHashes` match hits
+  `continue` before the `IsReview` branch, so an alternate is precisely what
+  stops a copy being taken. Visibility is the point of the revised ruling, and
+  "we already recognise this one" is not a reason to withhold its bytes.
+  ⚠️ This supersedes an earlier revision of this entry, which kept them.
+- That also squares the two allowlists. KTPAntiCheat dropped both paths from
+  `KnownBenignFileVariants` once they became allowed at any hash; all three
+  `BenignVariantManifestSyncTests` now pass against the regenerated manifest
+  (checked by running their logic over AC `origin/main`'s table, not assumed) —
+  6 manifest alternate pairs, 6 client pairs, identical. Keeping the alternates
+  would have left `EveryManifestAlternate_IsAlsoInTheClientAllowlist` naming
+  them, so the PR closes a guard rather than leaving one red.
+- Capture volume: the three viewmodels are 262/332/220 KB, so a player with all
+  three modified spends 0.79 MB of the 12 MB per-scan asset budget and 3 of its
+  16-file cap (`afraznein/KTPAntiCheat`#207). Comfortable.
+- `categorize()` now names the three `grenade_model` itself. The `.res` route
+  called them `model_other` while the explicit route said `grenade_model`, and
+  the dossier prints the category. Caught by the new tests, not by review.
+- `p_`/`w_` grenade models are untouched and stay violations.
+- Tests: 13, up from 9. They assert presence and severity together, because
+  either alone passes for the wrong manifest.
+- Deploy: regenerate and install `/opt/ktp-ac-api/game_files_manifest.json`
+  (operator). The live manifest is still the pre-#346 one, so installing this
+  changes three `severity` fields to `review` and removes two
+  `allowed_alternate_hashes` lists — nothing else.
+
+### `scripts`, `sql`, `config`: match reports carry kill streaks, per-side weapon and duel splits, and per-class rows (2026-09-14)
+
+Builds items 1-5 of `docs/proposals/streaks-and-side-splits.md`. Report schema
+10 -> 11, website contract `analytics-report-dto-v1.1.0` -> `v1.2.0` (additive;
+a report built before schema 11 reads `status: unavailable`, flag
+`not-in-report`, never zero).
+
+- `player_halves.rows[]` gains `side` (the side the player held that half, from
+  the life ledger) and `best_streak`. Cap breaks take `producer_half` when the
+  archive carries it, instead of placement by event time.
+- `kill_streaks` (`kill_streak_v1`, `scripts/kill_streaks.py`): best run of
+  enemy kills between the player's own life ends, per half, per match
+  (`players[]`) and per side (`players[].by_side`). Own teamkills neither count
+  nor reset; a grenade landing after the thrower died counts toward the fresh
+  counter; a frag with no producer clock takes the victim's death time when one
+  unclaimed death boundary lies within 2 s, otherwise its row is `lower_bound`.
+  Never the stock hlstatsx `kill_streak_N` actions. `players[].best_streak` is
+  the match value.
+- `weapon_sides` (`sql/analytics/weapon_half_fact.sql`): kills, headshot kills,
+  shots, hits and damage per player per half per weapon, under the player's
+  side, so picked-up enemy weapons stay on the player's side. `reconciled` says
+  whether the rows sum back to `weapons[]`.
+- `duels_by_side`: `duels[]` split by the killer's side, with `reconciled`.
+- `player_classes`: lives, kills, deaths and headshot kills per class id read at
+  spawn, labelled from `config/analytics/dod_classes.toml` (pinned against
+  hlstatsx `killerRole` by a test). No accuracy per class: shots have no class
+  or time at the source.
+- Not built: clutches (naming ruling pending) and momentum per side (profile
+  is still DRAFT).
+- Deploy regenerates every in-season match at schema 11 on the next tick, and
+  report_sync inserts them as new rows (the site reads the highest id).
+
 ### `lane-b`: apply the migrations the KTPHLStatsX ref under test carries (2026-09-14)
 
 Lane B extracted a fixed migration list out of the KTPHLStatsX commit under
@@ -516,7 +691,6 @@ shipped script over both cases: a plugin that compiles exits 0 and reports
 `Compilation Complete`; a plugin that does not exits 1 and reports
 `PLUGIN BUILD FAILED: <names>`.
 
-
 ### `scripts`: capture-health type checks no longer break on a newer producer (2026-09-10)
 
 Two places compared the set of per-half health streams against
@@ -545,7 +719,6 @@ squarely on the wave-0 canary it was meant to validate.
 
 This is the same exact-equality trap as the schema-version gates fixed
 earlier today, in a different guise.
-
 
 ### `config` + `scripts`: spawn ownership now comes from the maps, not from play (2026-09-10)
 
@@ -589,7 +762,6 @@ authored value, and the only thing that means "who owns this at spawn".
 
 `config/analytics/map_spawn_ownership.json` carries the full audit record for
 all 17 pool maps, including the neutral ones the TOML deliberately omits.
-
 
 ### Lane B + analytics: shot-context stream coverage, and a schema-24 drift fix (2026-09-10)
 
@@ -812,7 +984,6 @@ KTPHLStatsX's `dod_client_weapon_fire` / `ktp_shot_events` change (schema
   into a pending wave is stale again at the next 03:00.
 - `docs/RELEASE_CHECKLISTS.md` gains the § *Tier-2 runner re-sync* section, including what the tool does
   **not** cover and therefore still needs a per-wave look: test-mode plugins, KTPHudObserver, and configs.
-
 
 ### `ops`: loud swap failures, and a two-marker Tier 2 heartbeat (2026-08-26)
 

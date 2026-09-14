@@ -1,0 +1,28 @@
+# /etc/logrotate.d/ktp-systemd-alert
+#
+# Deployed alongside scripts/ktp-systemd-alert.py, which appends one capture per
+# unit failure. Separate stanza on purpose: the syslog caps live in
+# /etc/logrotate.d/rsyslog and are owned by someone else.
+#
+# The file is opened per append, so it needs no copytruncate.
+#
+# Retention is deliberately long. This log exists because journald on the data
+# server holds about two days, and a weekly unit's findings are read long after
+# that -- rotating this on journald's horizon would rebuild the hole it fills.
+
+/var/log/ktp-systemd-alert.log
+/var/log/ktp-systemd-alert-failed.log
+{
+        monthly
+        # A quiet fleet writes a few KiB a month; 12 keeps a season and a half.
+        rotate 12
+        # Bounds a unit that fails in a tight restart loop despite the cooldown.
+        maxsize 64M
+        missingok
+        notifempty
+        compress
+        # Keeps .1 plain text, so grepping across a rotation boundary needs no
+        # zcat on the day after one.
+        delaycompress
+        create 0640 root root
+}

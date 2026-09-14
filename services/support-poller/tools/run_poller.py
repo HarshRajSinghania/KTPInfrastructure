@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import poller as P  # noqa: E402
 
-PUBLIC_DEFAULT = "/var/www/support.ktpdod.com/status/public.json"
+PUBLIC_DEFAULT = "/var/lib/support-web/public.json"
 DETAIL_DEFAULT = "/var/lib/support-web/detail.json"
 PUSH_URL_DEFAULT = "https://ktpleague.gg/api/internal/servers/status"
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Sweep the fleet after the nightly 03:00 ET swap, and again before the next one
+
+[Timer]
+# After the swap: reconciles the restart that just happened.
+OnCalendar=*-*-* 03:45:00 America/New_York
+# Before the swap: an unledgered .new can still be pulled before it activates.
+OnCalendar=*-*-* 23:45:00 America/New_York
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

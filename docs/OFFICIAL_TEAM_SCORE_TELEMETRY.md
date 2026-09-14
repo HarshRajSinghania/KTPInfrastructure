@@ -162,6 +162,13 @@ explicit unavailable projection with no points. A sequence gap, late recovery,
 or match-end disagreement produces a partial projection with a quality flag.
 Multi-point jumps are retained as the single observed change.
 
+**Do not build on `project_official_score` as it stands: every real observer
+stream comes back unavailable.** It reads the 0/0 dip just after a half opens as
+a score movement rather than as the not-yet-restored carry, and it compares
+`ktp_match_end` through the terminal half's side slots when that row states the
+total in half 1's. The match report therefore does not use it; it reads the same
+stream through `scripts/in_game_result.py`, whose docstring carries both rules.
+
 The automated Lane B report join validates the private selected match, map,
 objective digest, and exact normalized-analytics facts digest, then strips the
 entire private binding. Only the strict neutral DTO and its SHA-256 reach JSON,

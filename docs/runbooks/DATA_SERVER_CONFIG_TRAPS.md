@@ -81,6 +81,43 @@ du -sh /var/log/journal          # the real figure
 journalctl --disk-usage          # default namespace only
 ```
 
+## A size cap is a retention promise that ages out from under you
+
+`/etc/systemd/journald.conf.d/10-ktp-size-cap.conf` sets `SystemMaxUse=1G` and
+says in its own comment that this is "roughly 4 days at the measured ~230MB/day".
+Measured 2026-09-14: the journal spans about two days, so the write rate has
+roughly doubled since the cap was written. **A cap in bytes buys a retention
+window in days only at a rate nobody re-measures**, and nothing anywhere reports
+that the window has halved.
+
+Two consequences worth separating:
+
+- `journalctl --list-boots` showed a single boot whose first entry was two days
+  old against an uptime of thirteen days. That is rotation, not a reboot —
+  read it as "the journal no longer reaches the start of this boot".
+- `systemctl status` says `Notice: journal has been rotated since unit was
+  started` and then prints nothing. The unit state survives; its output does not.
+
+Derive the window rather than trusting the comment:
+
+```bash
+journalctl -o short-iso | head -1      # oldest surviving entry
+uptime -s                              # compare: earlier means rotation
+```
+
+**For a unit whose stdout IS its report, this is data loss, not a missing trace.**
+`ktp-identity-reconcile` prints its findings and exits 1 to raise them; the
+weekly cadence guarantees a read long after two days. `ktp-systemd-alert` now
+appends every capture to `/var/log/ktp-systemd-alert.log`
+(`scripts/ktp-systemd-alert.logrotate`), which is where a failed unit's output
+should be read from first.
+
+rsyslog is a second copy — `ForwardToSyslog=yes` is in effect, so `/var/log/syslog*`
+carried findings the journal had already dropped — but not a durable one: its
+logrotate stanza is `rotate 4` with `maxsize 1G`, and on this box the size trigger
+fires every couple of days, so that window is around a week and varies with load.
+Useful for a recovery, never something to design around.
+
 ## Measuring disk through a symlink
 
 `/var/www/fastdl/demos` is a symlink. `du -sh` does not follow it and reports
