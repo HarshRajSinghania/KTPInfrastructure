@@ -20,6 +20,7 @@ website renders Unavailable, never zero.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import datetime
 from pathlib import Path
@@ -59,13 +60,51 @@ def _num(value):
         return None
 
 
-def ktpr_display(z, *, floor: float = 50.0, center: float = 100.0,
-                  per_z: float = 15.0):
+KTPR_DISPLAY_FLOOR = 50.0
+KTPR_DISPLAY_CENTER = 100.0
+KTPR_DISPLAY_PER_Z = 15.0
+
+# Published alongside the ratings so a consumer can tell, without reading this
+# module, which fields are already on a display scale and which are raw.
+#
+# This block exists because its absence caused a real outage. `parameters`
+# carries the MODEL's own settings, including "normalization":
+# "per_match_z_scores" — true of the internal math and of `components`, but
+# NOT of the published `rating`, which ktpr_display() has already rescaled.
+# A consumer that reasonably read that metadata as describing `rating`
+# applied a second z-score transform on top (keep-the-prac #679/#691), which
+# saturated every value to exactly 100.0 on every match page. Describe the
+# published scale explicitly rather than leaving it to be inferred.
+KTPR_DISPLAY_SCALE = {
+    "rating": {
+        "kind": "floored_index",
+        "center": KTPR_DISPLAY_CENTER,
+        "per_z": KTPR_DISPLAY_PER_Z,
+        "floor": KTPR_DISPLAY_FLOOR,
+        "note": "Already scaled for display: max(floor, center + per_z * z). "
+                "Render as published; do not transform again.",
+    },
+    "components": {
+        "kind": "raw_z_score",
+        "note": "Raw per-match z-scores, mean 0, negative below average. "
+                "A consumer that must not show negatives has to map these "
+                "itself.",
+    },
+}
+
+
+def ktpr_display(z, *, floor: float = KTPR_DISPLAY_FLOOR,
+                  center: float = KTPR_DISPLAY_CENTER,
+                  per_z: float = KTPR_DISPLAY_PER_Z):
     """Map a KTPR v2 z-score rating onto a floored display scale.
 
     Operator ruling 2026-09-09: KTPR v2 must never show a negative number
     on the website; 50 is the floor. Internal z-score math (ktpr_v2.py,
     ktpr_season.py) is unaffected — this only shapes what ships in the DTO.
+
+    The resulting scale is advertised in the payload as KTPR_DISPLAY_SCALE;
+    keep the two in step (tests/unit/test_analytics_report_dto.py pins that
+    the advertised numbers reproduce this function's output).
     """
     value = _num(z)
     if value is None:
@@ -296,6 +335,10 @@ def sanitize_report(report: dict) -> dict:
                 "definition_version": ktpr.get("definition_version"),
                 "calibration": ktpr.get("calibration"),
                 "parameters": dict(ktpr.get("parameters") or {}),
+                # `parameters` describes the model; `display_scale` describes
+                # what the numbers below actually are. They are not the same
+                # thing -- see KTPR_DISPLAY_SCALE.
+                "display_scale": copy.deepcopy(KTPR_DISPLAY_SCALE),
                 "components_used": list(ktpr.get("components_used") or []),
                 "players": [
                     {"name": _name(p.get("player_name_at_match"))

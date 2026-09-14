@@ -25,6 +25,7 @@ artifacts/real-match-tier2-20260906/run_production_report.py):
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -38,7 +39,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from scripts.ktpr_season import build_ktpr_v22
-from scripts.analytics_report_dto import PROVISIONAL_NOTICE, _name, ktpr_display
+from scripts.analytics_report_dto import (KTPR_DISPLAY_SCALE, PROVISIONAL_NOTICE,
+                                          _name, ktpr_display)
 from scripts.in_game_result import DEFAULT_OBSERVER_ROOT
 from scripts.report_scope import (
     IN_SCOPE, OFFICIAL_MATCH_TYPES, classify, match_scope_columns, print_held)
@@ -599,6 +601,12 @@ def build_aggregates(reports: list[dict]) -> dict[str, dict]:
         "shrinkage_k": ktpr["shrinkage_k"],
         "within_var": ktpr["within_var"],
         "min_matches": ktpr["min_matches"],
+        # rating and sos_rating below are already on the display scale; se is
+        # not (it stays in z units, since it is a spread, not a position).
+        "display_scale": {"rating": copy.deepcopy(KTPR_DISPLAY_SCALE["rating"]),
+                          "sos_rating": copy.deepcopy(KTPR_DISPLAY_SCALE["rating"]),
+                          "se": {"kind": "raw_z_score",
+                                 "note": "Standard error in z units, not rescaled."}},
         # database ids stay server-side; the website gets names only
         "players": [
             {"name": _name(p["name"]), "matches": p["matches"],

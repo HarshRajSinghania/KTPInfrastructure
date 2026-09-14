@@ -10,12 +10,16 @@ meaning is not obvious from their names.
 | `contract_version` | report `schema_version` | Change |
 |---|---|---|
 | `analytics-report-dto-v1.0.0` | 7-9 | Box score, trades, multikills, recap speed, ratings, lane analytics, spatial layers |
-| `analytics-report-dto-v1.1.0` | 10 | Adds `in_game_result`, `player_halves`, `lane_analytics.depth_profiles.units` |
+| `analytics-report-dto-v1.1.0` | 10 | Adds `in_game_result`, `player_halves`, `lane_analytics.depth_profiles.units`; always carries `ratings.ktpr_v2.display_scale` |
 
 Minor versions only add keys. A consumer that matches the
 `analytics-report-dto-v1.` prefix keeps working; one that needs the new blocks
 checks for them, because a v1.0.0 row never has them. A breaking change is a
 new major version.
+
+`ratings.ktpr_v2.display_scale` is the exception to that rule: it was added
+while the contract still read v1.0.0, so a v1.0.0 row may or may not carry it.
+Every v1.1.0 row does.
 
 The report `schema_version` changes whenever `build_report` output changes, and
 `report_service generate` regenerates every in-season match that has no report
@@ -78,6 +82,22 @@ half set in `ktp_matches`. It is read from the observer's settled
 A player with no events and no position samples in a half has no row for it.
 Assists and cap breaks have no half column at the source and are placed by
 event time. Damage columns are `null` for legacy matches without per-hit damage.
+
+## `ratings.ktpr_v2.display_scale`
+
+`parameters` describes the model, including `normalization:
+per_match_z_scores`. That is true of `components` but not of the published
+`rating`, which is already rescaled. `display_scale` says what each published
+field actually is:
+
+| Key | `kind` | Meaning |
+|---|---|---|
+| `rating` | `floored_index` | `max(floor, center + per_z * z)` with the block's `center` (100), `per_z` (15) and `floor` (50). Render as published; a second transform saturates it. |
+| `components` | `raw_z_score` | Per-match z-scores, mean 0, negative below average. A consumer that must not show negatives maps these itself. |
+
+The season aggregate (`report_service aggregate`) carries its own
+`display_scale`: `rating` and `sos_rating` are `floored_index` with the same
+numbers, and `se` is `raw_z_score` (a spread in z units, not rescaled).
 
 ## `lane_analytics.depth_profiles`
 

@@ -28,8 +28,35 @@ Report schema 9 -> 10, website contract `analytics-report-dto-v1.0.0` -> `v1.1.0
   of the lane through the flag origins, 0 = own end, 1 = enemy end, clamped to
   [0, 1]; `lateral_mean` is world units.
 - `report_service generate --observer-root` (default `/opt/hud-observer/matches`).
+- The v1.1.0 contract doc also describes `ratings.ktpr_v2.display_scale`
+  (#350), which shipped without a version change: a v1.1.0 row always
+  carries it, a v1.0.0 row may not.
 - Deploy regenerates every in-season match at schema 10 on the next tick, and
   report_sync inserts them as new rows (the site reads the highest id).
+
+### `scripts`: first-person grenade viewmodels leave the AC game-files manifest (2026-09-13)
+
+Operator ruling 2026-09-13, "allowable to be modified (for now)":
+`models/v_grenade.mdl`, `v_mills.mdl` and `v_stick.mdl` only change what a
+player sees in their own hands, so a modified copy is no longer a violation.
+The held (`p_`) and thrown (`w_`) grenade models are seen by other players
+and stay enforced.
+
+- `build-game-files-manifest.py` puts the three viewmodels in
+  `EXCLUDED_EXACT` and applies that set to `ktp_file.ini` as well as `.res`
+  references. Their explicit emit block and their two `ALTERNATE_HASHES`
+  entries are gone. They are excluded outright rather than downgraded,
+  because the client treats every severity except `review` as a violation,
+  and `review` copies the player's file into the session bundle.
+- The note that the viewmodels were in scope "to match ktp_file.ini" was
+  stale: KTPFileChecker dropped them from `ktp_file.ini` in `1bf59f6`.
+- `test_game_files_manifest_scope.py` offers the viewmodels through every
+  source and asserts they stay out, and that all six `p_`/`w_` grenade
+  models are still `grenade_model` violations.
+- Deploy: regenerate and install `/opt/ktp-ac-api/game_files_manifest.json`
+  (operator). KTPAntiCheat's `KnownBenignFileVariants` still lists
+  `v_grenade`/`v_stick`; its `Manifest=required` sync test will name them
+  as untracked until they are removed there.
 
 ### `scripts`: `report_service generate` reports a match only once every half has closed (2026-09-13)
 
