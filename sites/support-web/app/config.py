@@ -40,7 +40,7 @@ class Settings:
     db_password: str = ""
     db_name: str = "hlstatsx"
 
-    public_json: str = "/var/www/support.ktpdod.com/status/public.json"
+    public_json: str = "/var/lib/support-web/public.json"
     detail_json: str = "/var/lib/support-web/detail.json"
 
     @property

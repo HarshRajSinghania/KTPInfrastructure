@@ -4,6 +4,26 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `support-web`/`support-poller`: default `public.json` path no longer names the deleted docroot (2026-09-14)
+
+`PUBLIC_DEFAULT`/`public_json` in both `run_poller.py` copies and `app/config.py`,
+plus `support-web.env.example`, still named `/var/www/support.ktpdod.com/status/public.json`
+after that vhost's docroot was removed. `support-poller.service` loads
+`/etc/ktp/support-web.env` with `EnvironmentFile=-…` (leading `-` ignores a
+missing file), so if that env file ever vanished the poller would have silently
+re-targeted the deleted path. The live `/opt/support-web` copies were already
+corrected 2026-09-14 (no restart); this brings the repo default in line.
+
+- Defaults now read `/var/lib/support-web/public.json` in
+  `services/support-poller/tools/run_poller.py`, `sites/support-web/tools/run_poller.py`,
+  `sites/support-web/app/config.py`, and `sites/support-web/deploy/support-web.env.example`.
+- `sites/support-web/deploy/nginx-support.conf.example` is marked RETIRED — the
+  `support.ktpdod.com` vhost's `sites-enabled` entry and docroot are gone from
+  the data server, and delivery is now a direct push to ktpleague.gg rather than
+  nginx serving a static file, so the example is kept as a historical record only.
+- `tests/test_config.py`: added a case asserting the default never names
+  `support.ktpdod.com`.
+
 ### `scripts`: match reports carry the in-game result and per-half player rows; `mean_depth` unit stated (2026-09-13)
 
 The public match report had to read its score from the website's `ktp.match`,
