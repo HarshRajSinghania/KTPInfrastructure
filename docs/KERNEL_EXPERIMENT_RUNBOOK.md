@@ -90,18 +90,20 @@ sudo sed -i 's|^\(GRUB_CMDLINE_LINUX_DEFAULT="\)|\1preempt=full |' /etc/default/
 grep GRUB_CMDLINE_LINUX_DEFAULT /etc/default/grub
 # Regenerate grub.cfg (Ubuntu way):
 sudo update-grub
-# Because GRUB_DEFAULT=saved, explicitly set the default menuentry to the lowlatency kernel:
-# POSITIONAL, never a menu title. A title pin outlives the experiment: Atlanta ran
-# the title form of this command and stayed on 6.8.0-110 through every later kernel
-# update -- silently, because the pinned kernel running clears reboot-required.
-# '1>0' = Advanced submenu, first entry = the newest lowlatency kernel, always.
-# See docs/runbooks/GRUB_DEFAULT_KERNEL.md.
-sudo grub-set-default '1>0'
-# Verify:
-sudo grub-editenv list
+# No grub-set-default: with the flavour pin, entry 0 is the newest lowlatency kernel.
+# Confirm before rebooting (docs/runbooks/GRUB_DEFAULT_KERNEL.md):
+awk '/^menuentry /{f=1} f && /^\tlinux\t/{print $2; exit}' /boot/grub/grub.cfg
+ls /boot/vmlinuz-*-lowlatency | sort -V | tail -1   # must be the same kernel
 # Reboot:
 sudo reboot
 ```
+
+**Correction (2026-09-13):** this block used to finish with `grub-set-default '1>0'`, commented
+"Advanced submenu, first entry = the newest lowlatency kernel, always". That is wrong. The submenu
+is ordered by version, so whenever a newer generic kernel is installed it sits at `1>0` and the
+reboot boots generic. The block also assumed `GRUB_DEFAULT=saved`, which no host has used since
+2026-08-28. Don't swap in a title pin either: Atlanta ran the title form of this command and stayed
+on 6.8.0-110 through every later kernel update.
 
 **Soak:** 48 hours. Pull `[KTP_PROFILE]` data, compare against the other 3 baremetals during the same window.
 
@@ -140,8 +142,7 @@ sudo cp /etc/default/grub /etc/default/grub.idle-poll-experiment-bak-${TS}
 sudo sed -i 's|^\(GRUB_CMDLINE_LINUX_DEFAULT="\)|\1idle=poll |' /etc/default/grub
 grep GRUB_CMDLINE_LINUX_DEFAULT /etc/default/grub
 sudo update-grub
-sudo grub-set-default '1>0'   # positional -- see the warning at the first grub-set-default above
-sudo grub-editenv list
+awk '/^menuentry /{f=1} f && /^\tlinux\t/{print $2; exit}' /boot/grub/grub.cfg   # entry 0: the newest lowlatency kernel
 sudo reboot
 ```
 
@@ -154,7 +155,7 @@ sudo reboot
 
 **Cost expectations:** isolated cores 2-7 will report ~100% CPU utilization in `top` / `htop` because the idle task is now busy-polling instead of HLTing. This is cosmetic — the SCHED_FIFO game-server tasks still preempt the idle task as needed. Real "useful CPU" stays at the same ~3-5% per game-server core. Power/thermal: baremetal, ATL room, no concern in off-season.
 
-**Rollback:** `sudo cp /etc/default/grub.idle-poll-experiment-bak-<TS> /etc/default/grub && sudo update-grub && sudo grub-set-default '1>0' && sudo reboot`. ~3 min window.
+**Rollback:** `sudo cp /etc/default/grub.idle-poll-experiment-bak-<TS> /etc/default/grub && sudo update-grub && sudo reboot`. ~3 min window.
 
 **Stop conditions during soak:**
 - Any ATL instance shows >5% fps p50 regression vs control hosts in the same window
@@ -350,7 +351,7 @@ make -j$(nproc) deb-pkg LOCALVERSION=-ktp-1
 
 - Must rebuild on every Ubuntu kernel security update (~monthly)
 - One-off test on Atlanta first; if it holds for 2 weeks of matchday traffic, consider Dallas next
-- Keep stock kernel installed as fallback — `grub-set-default` to flip back is ~3min
+- Keep stock kernel installed as fallback — a `grub-reboot` one-shot onto it (section 6) is the ~3 min flip back
 
 ### Don't build if
 
@@ -401,41 +402,46 @@ KVM, or serial) works. It is the only recovery path if the host does not come ba
 precondition SSH itself cannot verify — if SSH is what you'd use to check it, you haven't checked it.
 
 **The key move is `grub-reboot`, not `grub-set-default`.** GRUB writes `next_entry` to grubenv,
-boots that entry exactly once, and then clears it — reverting to `saved_entry` on the boot *after*,
+boots that entry exactly once, and then clears it — reverting to the default entry on the boot *after*,
 **whether or not the risky boot succeeded**. A kernel that fails to come up self-heals on the next
 power cycle with no manual grub surgery. `grub-set-default` has no such safety net: it rewrites
 `saved_entry` immediately and permanently, so a bad kernel is what every subsequent boot lands on
 until someone notices and fixes it by hand.
 
 ```bash
-# On the host, as root. Identify the target entry first -- see
-# docs/runbooks/GRUB_DEFAULT_KERNEL.md for how menu entries are laid out and
-# numbered on this fleet (grub-mkconfig emits newest-first, lowlatency ahead
-# of generic).
-grep -E '^(menuentry|submenu)' /boot/grub/grub.cfg
+# On the host, as root. Pin the one-shot by menu id: an id names a kernel, while a
+# position like '1>2' names whatever sits there after the last update-grub.
+grep -o "gnulinux-advanced-[^']*\|gnulinux-[^']*-advanced-[^']*" /boot/grub/grub.cfg | sort -u
 
-# One-shot: boots the target entry on the NEXT reboot only. A positional
-# submenu>index (e.g. '1>2') or a literal menu title both work here --
-# unlike grub-set-default, a one-shot pin cannot go stale, because it is
-# consumed after a single boot regardless of outcome.
-grub-reboot '1>2'          # replace 1>2 with the entry found above
-grub-editenv list          # confirm next_entry is set, saved_entry unchanged
+# One-shot: boots the target entry on the NEXT reboot only. A submenu entry is
+# '<submenu id>><entry id>'. Unlike grub-set-default, a one-shot cannot go stale,
+# because it is consumed after a single boot regardless of outcome.
+grub-reboot 'gnulinux-advanced-<root-uuid>>gnulinux-<version>-advanced-<root-uuid>'
+grub-editenv list          # confirm next_entry is set
 reboot
 ```
 
 **After the host comes back, verify before doing anything else** — instance count, listening ports,
 failed units, whatever the experiment's own success criteria are. Only once the new kernel has had a
-real burn-in (matchday traffic, not just "it booted") do you make it permanent:
+real burn-in (matchday traffic, not just "it booted") does it become the default, and usually there
+is nothing to run:
 
-```bash
-grub-set-default '1>0'     # the fleet canon -- always "newest lowlatency"; use the
-                            # same entry as the grub-reboot above only if it should
-                            # stay pinned rather than simply become the new "newest"
-grub-editenv list           # next_entry is empty again (one-shot consumed); saved_entry updated
-```
+- **A stock lowlatency kernel** that is the newest one installed is already entry 0 under the
+  flavour pin (`docs/runbooks/GRUB_DEFAULT_KERNEL.md`). Confirm with
+  `scripts/fix-grub-default-kernel.sh`.
+- **A kernel of another flavour** (a custom `-ktp-1` build) ranks below lowlatency, so making it the
+  default means changing `GRUB_FLAVOUR_ORDER` in the drop-in and running `update-grub`, not
+  `grub-set-default`.
+
+**Correction (2026-09-13):** this step used to be `grub-set-default '1>0'`, described as "the fleet
+canon -- always newest lowlatency". It isn't. `1>0` is the Advanced submenu's first entry, and the
+submenu is ordered by version, so a newer generic kernel takes that slot. The positional one-shot
+shown here before (`grub-reboot '1>2'`) works only if nothing runs `update-grub` between reading the
+menu and rebooting.
 
 Reverting a risky boot that failed to come up needs nothing — it already happened automatically. If
-it booted but you don't want to keep it, `grub-set-default` back to the previous entry.
+it booted but you don't want to keep it and it is the entry-0 kernel, remove it and run
+`update-grub`; otherwise the next ordinary reboot already returns to entry 0.
 
 ### Related trap: an index-based `GRUB_DEFAULT` silently repoints itself
 
@@ -448,9 +454,10 @@ next `update-grub` than it did when it was set — measured on this fleet: Denve
 `1>2` did not agree with each other, and neither reliably meant "newest lowlatency" as kernels were
 added and removed over time.
 
-**Prefer `GRUB_DEFAULT=0`** (or `saved` + `grub-set-default '1>0'`, the fleet's `saved`-based canon —
-see `GRUB_DEFAULT_KERNEL.md`), never a bare numeric index into a submenu. And never a literal menu
-title for a *permanent* default either — that is the Atlanta failure this same runbook triggered in
-the first place. A named or indexed **one-shot** (`grub-reboot`) is fine, because it is consumed after
-one boot and cannot go stale; a named or indexed **permanent** default (`grub-set-default`) is not,
-because nothing ever re-evaluates it.
+**Prefer `GRUB_DEFAULT=0` with the flavour drop-in** (see `GRUB_DEFAULT_KERNEL.md`), never a bare
+numeric index into a submenu. This paragraph used to offer `saved` + `grub-set-default '1>0'` as an
+equivalent canon; it is wrong for the reason given in the correction above. And never a literal menu
+title or id for a *permanent* default either — that is the Atlanta failure this same runbook
+triggered in the first place. A named or indexed **one-shot** (`grub-reboot`) is fine, because it is
+consumed after one boot and cannot go stale; a named or indexed **permanent** default
+(`grub-set-default`) is not, because nothing ever re-evaluates it.

@@ -1,0 +1,13 @@
+GRUB_DEFAULT=0
+GRUB_TIMEOUT_STYLE=hidden
+GRUB_TIMEOUT=0
+GRUB_DISTRIBUTOR=`( . /etc/os-release; echo ${NAME:-Ubuntu} ) 2>/dev/null || echo Ubuntu`
+GRUB_CMDLINE_LINUX_DEFAULT="intel_idle.max_cstate=0 mitigations=off processor.max_cstate=0 isolcpus=2,3,4,5,6,7 nohz_full=2,3,4,5,6,7 rcu_nocbs=2,3,4,5,6,7"
+GRUB_CMDLINE_LINUX=""
+#GRUB_DISABLE_OS_PROBER=false
+#GRUB_BADRAM="0x01234567,0xfefefefe,0x89abcdef,0xefefefef"
+#GRUB_TERMINAL=console
+#GRUB_GFXMODE=640x480
+#GRUB_DISABLE_LINUX_UUID=true
+#GRUB_DISABLE_RECOVERY="true"
+#GRUB_INIT_TUNE="480 440 1"

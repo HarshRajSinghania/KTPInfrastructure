@@ -439,21 +439,26 @@ LOWLATENCY_KERNEL=$(ls /boot/vmlinuz-*-lowlatency 2>/dev/null | sort -V | tail -
 if [ -n "$LOWLATENCY_KERNEL" ]; then
     log_info "Lowlatency kernel installed: $LOWLATENCY_KERNEL"
 
-    # Boot the lowlatency kernel by NAME, not by positional submenu index. The
-    # old "1>2" (submenu 1, entry 2) silently inverts if grub's version sort
-    # orders the freshly-pulled lowlatency kernel differently from the ISO's
-    # generic — booting generic (250Hz, no CPU isolation) with no error. The
-    # name path is stable across sort order.
-    GRUB_LL_ENTRY="Advanced options for Ubuntu>Ubuntu, with Linux ${LOWLATENCY_KERNEL}"
-    log_info "Configuring GRUB to boot lowlatency kernel by name..."
-    sed -i "s|^GRUB_DEFAULT=.*|GRUB_DEFAULT=\"${GRUB_LL_ENTRY}\"|" /etc/default/grub
-    update-grub
-    if grep -q "with Linux ${LOWLATENCY_KERNEL}'" /boot/grub/grub.cfg 2>/dev/null; then
-        log_info "GRUB default set to: $GRUB_LL_ENTRY"
+    # Rank by flavour, never pin a title: a title freezes this kernel version, and version order lets a newer generic take entry 0.
+    KTP_FLAVOUR_DROPIN=/etc/default/grub.d/99-ktp-kernel-flavour.cfg
+    if grep -qs GRUB_FLAVOUR_ORDER /usr/lib/grub/grub-sort-version; then
+        mkdir -p /etc/default/grub.d
+        printf '%s\n' '# Rank lowlatency kernels above generic so entry 0 is the newest lowlatency kernel.' \
+            'GRUB_FLAVOUR_ORDER="lowlatency"' > "$KTP_FLAVOUR_DROPIN"
+        log_info "GRUB flavour order written to $KTP_FLAVOUR_DROPIN"
     else
-        log_warn "Could not confirm the lowlatency menuentry in grub.cfg — VERIFY after reboot"
-        log_warn "  uname -r should end in -lowlatency; if it doesn't, run:"
-        log_warn "  grub-set-default '$GRUB_LL_ENTRY' && update-grub"
+        log_warn "This grub build ignores GRUB_FLAVOUR_ORDER — entry 0 follows kernel version order"
+        log_warn "  a newer generic kernel would boot instead of lowlatency; see docs/runbooks/GRUB_DEFAULT_KERNEL.md"
+    fi
+    # Earlier runs of this script wrote a menu title here, which would override the flavour order.
+    sed -i 's|^GRUB_DEFAULT=.*|GRUB_DEFAULT=0|' /etc/default/grub
+    update-grub
+    GRUB_ENTRY0=$(awk '/^menuentry /{f=1} f && /^\tlinux\t/{print $2; exit}' /boot/grub/grub.cfg 2>/dev/null | sed 's|.*/vmlinuz-||' || true)
+    if [ "$GRUB_ENTRY0" = "$LOWLATENCY_KERNEL" ]; then
+        log_info "GRUB entry 0 boots $LOWLATENCY_KERNEL"
+    else
+        log_warn "GRUB entry 0 boots '${GRUB_ENTRY0:-unknown}', not $LOWLATENCY_KERNEL — VERIFY before rebooting"
+        log_warn "  see docs/runbooks/GRUB_DEFAULT_KERNEL.md; never pin a kernel title with grub-set-default"
     fi
 
     log_warn "REBOOT REQUIRED to activate lowlatency kernel!"
