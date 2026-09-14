@@ -4,6 +4,42 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: the fleet audit redacts by shape before anything is published (2026-09-14)
+
+`.github/workflows/fleet-audit.yml` posts the drift report to a GitHub issue and
+uploads it as a run artifact. This repository is public, so both are
+world-readable, and `fleet-drift-snapshot.sh` captures root's crontab and
+`/etc/rc.local` **verbatim**. A credential ever written into a cron line would
+publish itself on the first run, and a published artifact cannot be unpublished.
+The workflow is `active` with `0` runs, so nothing has been published yet.
+
+- New `scripts/audit_redact.py`. It redacts by SHAPE, never against a list of
+  today's credentials: a denylist goes stale at the next rotation, and it goes
+  stale in the direction that leaks. Nothing survives a redacted line that is
+  the userinfo half of a URL, the right-hand side of an assignment whose NAME
+  names a credential, the right-hand side of any shell env assignment inside
+  root's crontab, or an opaque token (≥20 chars of `[A-Za-z0-9+=_-]` mixing
+  upper, lower and digits, or ≥32 hex). A `$VAR` reference is kept: it is not a
+  value, and whether a host inlines a credential is the drift worth seeing.
+- It runs in `snapshot_payload()`, where the fleet's text enters the process —
+  not on the report. The report is one of four things built from that text
+  (report, Discord delta, state file, CI artifact), and redacting the report
+  alone would still upload the value.
+- The value half of every fact the `provision/expected-*.conf` sections compare
+  is untouched: GRUB flags, sysctl values, 16-char binary md5 prefixes, LinuxGSM
+  monitor states, and the `/etc/rc.local` lines the `expected-rc-local.conf`
+  globs match. A redaction that ate those would turn the report green by
+  blinding it. Measured read-only against three live hosts: one line changed per
+  host (the root filesystem UUID, already ignored by rule), 15/15 rc.local globs
+  and 6/6 cmdline flags still matching.
+- Fleet addresses leave the report: the roster prints name and group only, and
+  connection errors go through `redact_diagnostic()` in both
+  `audit-fleet-drift.py` and `ktp-restart-drift.py`.
+- This also narrows `/var/log/ktp-audit-*.md` on the data server, which the
+  weekly cron writes `0644`.
+- No workflow behaviour changed. The `fleet-audit` label and
+  `CLAUDE_CODE_OAUTH_TOKEN` remain uncreated, and are still the two gates.
+
 ### `support-web`/`support-poller`: default `public.json` path no longer names the deleted docroot (2026-09-14)
 
 `PUBLIC_DEFAULT`/`public_json` in both `run_poller.py` copies and `app/config.py`,
