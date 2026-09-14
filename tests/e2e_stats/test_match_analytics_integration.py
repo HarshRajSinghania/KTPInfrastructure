@@ -488,3 +488,67 @@ WHERE match_id='receipt-clock-TEST'
     assert late["authorized"] is False
     assert any("activation receipt latency 4s" in error
                for error in late["errors"])
+
+
+def test_capture_facts_exclude_warmup_bleed_at_half_start():
+    """A capture completing in the same rounded second as the half's own
+    start_time is warmup bleed-through (the daemon's round_live flag flips at
+    KTP_MATCH_START, but a capture attempt begun a moment earlier in warmup
+    can still complete just after) -- real captures need several seconds to
+    complete and can never land here. Found auditing S10 day-1 production
+    data 2026-09-13: 2 of 1,049 captures that day, 76 of ~4,700 since August.
+
+    Every production query that reads ktp_flag_captures needs this guard --
+    capture_credit_fact.sql and capture_event_fact.sql are checked fully
+    here; cap_participation_fact.sql, objective_timeline_fact.sql,
+    player_match_fact.sql, player_half_fact.sql, quality_inventory.sql and
+    scripts/lane_b_match_report.py's own capture query carry the identical
+    fix (same join, same predicate) but are not separately re-fixtured here
+    -- most need a much larger table set (frags, damage, statsme, ...) just
+    to parse.
+    """
+    with EphemeralMysql.start(parent=Path("/tmp")) as db:
+        db.sql("""
+CREATE TABLE ktp_matches (
+  match_id VARCHAR(64) NOT NULL, half TINYINT NOT NULL,
+  start_time DATETIME NOT NULL
+);
+CREATE TABLE ktp_match_players (
+  match_id VARCHAR(64) NOT NULL, player_id INT NOT NULL,
+  player_name VARCHAR(64) NOT NULL, team TINYINT NOT NULL,
+  joined_at DATETIME NOT NULL
+);
+CREATE TABLE ktp_flag_captures (
+  id INT AUTO_INCREMENT PRIMARY KEY, server_id INT NOT NULL DEFAULT 1,
+  match_id VARCHAR(64), half TINYINT NOT NULL, player_id INT NOT NULL,
+  team VARCHAR(16), flag_name VARCHAR(64), event_time DATETIME NOT NULL
+);
+INSERT INTO ktp_matches VALUES ('warmup-bleed-TEST', 1, '2026-09-13 15:00:00');
+INSERT INTO ktp_match_players VALUES
+  ('warmup-bleed-TEST', 1, 'leaker', 2, '2026-09-13 15:00:00'),
+  ('warmup-bleed-TEST', 2, 'capper', 1, '2026-09-13 15:00:00');
+INSERT INTO ktp_flag_captures (match_id, half, player_id, team, flag_name, event_time) VALUES
+  ('warmup-bleed-TEST', 1, 1, 'Axis',   'MID', '2026-09-13 15:00:00'),
+  ('warmup-bleed-TEST', 1, 2, 'Allies', 'MID', '2026-09-13 15:00:05');
+""")
+        credits = analytics.query_rows(db, "capture_credit_fact.sql", "warmup-bleed-TEST")
+        events = analytics.query_rows(db, "capture_event_fact.sql", "warmup-bleed-TEST")
+        participation = analytics.query_rows(
+            db, "cap_participation_fact.sql", "warmup-bleed-TEST"
+        )
+        timeline = analytics.query_rows(
+            db, "objective_timeline_fact.sql", "warmup-bleed-TEST"
+        )
+
+    assert [row["player_id"] for row in credits] == [2]
+    assert len(events) == 1
+    assert events[0]["credited_players"] == 1
+    assert str(events[0]["event_time"]) == "2026-09-13 15:00:05"
+
+    # A team of one, credited for the one real capture: 100% participation,
+    # not diluted by the excluded warmup row.
+    assert [row["player_id"] for row in participation] == [2]
+    assert participation[0]["caps_participated"] == participation[0]["team_caps"] == "1"
+
+    assert len(timeline) == 1
+    assert str(timeline[0]["event_time"]) == "2026-09-13 15:00:05"

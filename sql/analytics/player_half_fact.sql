@@ -85,10 +85,12 @@ damage AS (
     GROUP BY r.player_id, d.half
 ),
 captures AS (
-    SELECT player_id, half, COUNT(*) AS capture_credits
-    FROM ktp_flag_captures
-    WHERE match_id = {{MATCH_ID}}
-    GROUP BY player_id, half
+    -- Excludes warmup bleed-through -- see capture_credit_fact.sql.
+    SELECT c.player_id, c.half, COUNT(*) AS capture_credits
+    FROM ktp_flag_captures c
+    JOIN halves h ON h.half = c.half
+    WHERE c.match_id = {{MATCH_ID}} AND c.event_time > h.start_time
+    GROUP BY c.player_id, c.half
 ),
 weapon_totals AS (
     SELECT playerId AS player_id, half, SUM(shots) AS shots, SUM(hits) AS hits

@@ -3,9 +3,12 @@
 -- only; "broke for it" participation needs zone-occupancy telemetry and is
 -- deliberately not approximated here.
 WITH caps AS (
-    SELECT half, event_time, flag_name, team, player_id
-    FROM ktp_flag_captures
-    WHERE match_id = {{MATCH_ID}}
+    -- Excludes warmup bleed-through -- see capture_credit_fact.sql.
+    SELECT c.half, c.event_time, c.flag_name, c.team, c.player_id
+    FROM ktp_flag_captures c
+    LEFT JOIN ktp_matches m ON m.match_id = c.match_id AND m.half = c.half
+    WHERE c.match_id = {{MATCH_ID}}
+      AND (m.start_time IS NULL OR c.event_time > m.start_time)
 ),
 team_events AS (
     SELECT team,
