@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Inventory KTP match maps and enforce explicit spatial-readiness gates."""
+"""Inventory KTP match maps and enforce explicit spatial-readiness gates.
+
+Maps come from `ktp_maps.ini`, the map->config binding table KTPMatchHandler
+itself reads. Discovery used to regex the `say KTP <map> Match Config Executed`
+line out of each `ktp_*.cfg`, which is chat text bound to nothing: `ktp_saints.cfg`
+announces `dod_saints` while serving `dod_saints2_b3e`, and most of the custom
+pool was invisible to every count this script produced.
+"""
 
 from __future__ import annotations
 
@@ -12,10 +19,15 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MAP_LINE = re.compile(
+DEFAULT_MAPS_INI = "config/local/ktp_maps.ini"
+# Cosmetic only. A config's `say` line is chat text; it is not what binds the
+# config to a map, and on the custom pool it routinely names a different map.
+ANNOUNCED_MAP = re.compile(
     r"^\s*say\s+KTP\s+(?:CLASSIC\s+)?(dod_[A-Za-z0-9_]+)\s+Match\s+Config\s+Executed\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+INI_SECTION = re.compile(r"^\[([^\]]+)\]$")
+INI_CONFIG = re.compile(r"^config\s*=\s*(\S+)\s*$", re.IGNORECASE)
 REVIEW_FIELDS = (
     "overview_transform_reviewed",
     "flag_geometry_reviewed",
@@ -35,22 +47,100 @@ def display_path(path: Path, root: Path) -> str:
         return str(path.resolve())
 
 
-def discover_configs(config_dir: Path, root: Path = ROOT) -> tuple[dict[str, list[str]], list[str]]:
-    discovered: dict[str, list[str]] = {}
-    errors: list[str] = []
-    for path in sorted(config_dir.glob("ktp_*.cfg")):
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
-        matches = MAP_LINE.findall(text)
-        if len(matches) != 1:
-            errors.append(
-                f"{display_path(path, root)}: expected one KTP match-config map declaration, found {len(matches)}"
+def normalise_map_name(name: str) -> str:
+    name = name.strip()
+    if name.lower().endswith(".bsp"):
+        name = name[: -len(".bsp")]
+    return name.lower()
+
+
+def parse_maps_ini(path: Path) -> dict[str, str]:
+    """Map name -> match-config filename, read the way KTPMatchHandler reads it.
+
+    Mirrors `load_map_mappings()` in `KTPMatchHandler.sma`: `;`/`#` comments,
+    `[map]` sections normalised with the .bsp strip and lowercase, and only the
+    first `config =` inside a section (the plugin clears the section after it).
+    """
+    bindings: dict[str, str] = {}
+    section = ""
+    for raw in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line[0] in ";#":
+            continue
+        header = INI_SECTION.match(line)
+        if header:
+            section = normalise_map_name(header.group(1))
+            continue
+        body = INI_CONFIG.match(line)
+        if body and section:
+            bindings[section] = body.group(1).strip()
+            section = ""
+    return bindings
+
+
+class Discovery:
+    """What the map inventory found, and what it could not account for."""
+
+    def __init__(self) -> None:
+        self.maps: dict[str, list[str]] = {}
+        self.errors: list[str] = []
+        self.unresolved_bindings: list[str] = []
+        self.unreferenced_configs: list[str] = []
+        self.announcement_mismatches: list[str] = []
+
+
+def discover_configs(config_dir: Path, maps_ini: Path, root: Path = ROOT) -> Discovery:
+    """Inventory maps from the map->config bindings the server actually uses.
+
+    Discovery keys on `ktp_maps.ini`, not on a config's `say` line: the say line
+    is chat text nothing reads, and on the custom pool it names a different map
+    than the one the config is bound to, which made most of the pool invisible.
+    """
+    found = Discovery()
+    if not maps_ini.is_file():
+        found.errors.append(f"{display_path(maps_ini, root)}: map bindings file not found")
+        return found
+
+    bindings = parse_maps_ini(maps_ini)
+    if not bindings:
+        found.errors.append(f"{display_path(maps_ini, root)}: no [map] section declares a config")
+        return found
+
+    configs_for: dict[Path, list[str]] = {}
+    for map_name, config_name in sorted(bindings.items()):
+        config_path = config_dir / config_name
+        # The map is real either way -- the binding names it. A missing config
+        # means the server's exec is a no-op on that map, so inventory it and
+        # say so rather than dropping it back out of sight.
+        found.maps.setdefault(map_name, [])
+        if not config_path.is_file():
+            found.unresolved_bindings.append(
+                f"{map_name} -> {display_path(config_path, root)}"
             )
             continue
-        map_name = matches[0].lower()
-        discovered.setdefault(map_name, []).append(display_path(path, root))
-    if not discovered:
-        errors.append(f"{display_path(config_dir, root)}: no ktp_*.cfg match configs found")
-    return discovered, errors
+        found.maps[map_name].append(display_path(config_path, root))
+        configs_for.setdefault(config_path, []).append(map_name)
+
+    for config_path, map_names in sorted(configs_for.items()):
+        announced = {
+            name.lower()
+            for name in ANNOUNCED_MAP.findall(
+                config_path.read_text(encoding="utf-8-sig", errors="replace")
+            )
+        }
+        if announced and not announced & set(map_names):
+            found.announcement_mismatches.append(
+                f"{display_path(config_path, root)}: announces {'/'.join(sorted(announced))}, "
+                f"bound to {', '.join(map_names)}"
+            )
+
+    referenced = {path.name for path in configs_for}
+    found.unreferenced_configs = sorted(
+        display_path(path, root)
+        for path in config_dir.glob("ktp_*.cfg")
+        if path.name not in referenced
+    )
+    return found
 
 
 def readiness_status(entry: dict[str, Any], minimum_synthetic: int,
@@ -64,8 +154,11 @@ def readiness_status(entry: dict[str, Any], minimum_synthetic: int,
 
 
 def build_registry(config: dict[str, Any], config_dir: Path,
+                   maps_ini: Path | None = None,
                    root: Path = ROOT) -> dict[str, Any]:
-    discovered, errors = discover_configs(config_dir, root)
+    found = discover_configs(config_dir, maps_ini or (root / DEFAULT_MAPS_INI), root)
+    discovered = found.maps
+    errors = found.errors
     defaults = config.get("defaults") or {}
     overrides = config.get("maps") or {}
     minimum_synthetic = int(config.get("minimum_synthetic_matches", 5))
@@ -74,7 +167,7 @@ def build_registry(config: dict[str, Any], config_dir: Path,
 
     unknown_overrides = sorted(set(overrides) - set(discovered))
     for map_name in unknown_overrides:
-        errors.append(f"registry override has no discovered KTP match config: {map_name}")
+        errors.append(f"registry override names a map with no match-config binding: {map_name}")
 
     for map_name, config_paths in discovered.items():
         entry = dict(defaults)
@@ -109,13 +202,19 @@ def build_registry(config: dict[str, Any], config_dir: Path,
         for status in ("competitive_ready", "synthetic_ready", "blocked")
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "minimum_synthetic_matches": minimum_synthetic,
         "minimum_human_matches": minimum_human,
         "valid": not errors,
         "errors": errors,
         "counts": counts,
         "maps": maps,
+        # Reported, not fatal: these are pre-existing config-tree drift, not
+        # spatial-readiness failures. Listing them keeps the drift visible
+        # without turning this gate red on something it does not own.
+        "unresolved_bindings": found.unresolved_bindings,
+        "unreferenced_configs": found.unreferenced_configs,
+        "announcement_mismatches": found.announcement_mismatches,
     }
 
 
@@ -157,6 +256,28 @@ def render_markdown(registry: dict[str, Any]) -> str:
     if registry["errors"]:
         lines.extend(["", "## Validation errors", ""])
         lines.extend(f"- {error}" for error in registry["errors"])
+    if registry["unresolved_bindings"]:
+        lines.extend([
+            "", "## Bindings whose match config is missing", "",
+            "`ktp_maps.ini` binds these maps to a config file that is not in the config "
+            "directory. On a host where that is also true, `exec_map_config` execs a path "
+            "that does not exist, nothing reports it, and clan mode is never armed.", "",
+        ])
+        lines.extend(f"- {item}" for item in registry["unresolved_bindings"])
+    if registry["unreferenced_configs"]:
+        lines.extend([
+            "", "## Match configs no map is bound to", "",
+            "These exist in the config directory but no `ktp_maps.ini` section names them, "
+            "so the server never execs them and no map is inventoried from them.", "",
+        ])
+        lines.extend(f"- {name}" for name in registry["unreferenced_configs"])
+    if registry["announcement_mismatches"]:
+        lines.extend([
+            "", "## Stale config announcements", "",
+            "Cosmetic: the `say` line names a map the config is not bound to. Nothing reads it, "
+            "and discovery no longer does either — listed so the drift stays visible.", "",
+        ])
+        lines.extend(f"- {item}" for item in registry["announcement_mismatches"])
     lines.extend([
         "",
         "Readiness records evidence; it does not create waypoints, invent map coordinates, or infer flag weights from another map.",
@@ -175,6 +296,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--config-dir", type=Path,
         default=ROOT / "config/local/dod-configs",
     )
+    parser.add_argument(
+        "--maps-ini", type=Path, default=ROOT / DEFAULT_MAPS_INI,
+        help="KTPMatchHandler map->config bindings; the source of map discovery",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args(argv)
 
@@ -182,7 +307,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        registry = build_registry(read_json(args.registry), args.config_dir)
+        registry = build_registry(read_json(args.registry), args.config_dir, args.maps_ini)
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / "spatial-map-registry.json").write_text(
             json.dumps(registry, indent=2) + "\n", encoding="utf-8"
