@@ -403,8 +403,9 @@ fi
 log_info "Configuring low-latency kernel..."
 
 # Kernel strategy differs by release:
-#  - 22.04 / 24.04: the generic kernel is 250Hz; the separate `linux-lowlatency`
-#    image (1000Hz, PREEMPT) is worth booting. Install it.
+#  - 22.04 / 24.04: install the separate `linux-lowlatency` image (1000Hz, full
+#    preemption). 22.04's generic kernel is 250Hz; 24.04's is also 1000Hz but
+#    defaults to voluntary preemption, so lowlatency still differs there.
 #  - 26.04+: the GENERIC kernel is already CONFIG_HZ=1000 + NO_HZ_FULL +
 #    PREEMPT_DYNAMIC, and `linux-lowlatency` there is NOT a separate image — it
 #    just pulls a `lowlatency-kernel` settings pkg whose GRUB drop-in forces

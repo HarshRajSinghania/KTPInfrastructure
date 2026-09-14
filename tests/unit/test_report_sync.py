@@ -484,6 +484,178 @@ class TestTransientReadRetry(unittest.TestCase):
                 report_sync.main(["--since", "2026-09-13"])
 
 
+class FakeResponse:
+    """Stands in for the `with urlopen(...) as resp:` context manager."""
+
+    def read(self):
+        return b'{"ok":true,"scope":"ktp","invalidated":["match-reports"]}'
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestRevalidateSite(unittest.TestCase):
+    """report_sync.revalidate_site() in isolation: the request it builds and
+    how it behaves under failure. Never allowed to raise -- that is the
+    property the caller (main()) depends on."""
+
+    WITH_SECRET = {"KTP_SITE_REVALIDATE_SECRET": "s3cr3t"}
+
+    def test_skips_with_a_warning_when_the_secret_is_unset(self):
+        err = io.StringIO()
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch("sys.stderr", err), \
+                mock.patch("urllib.request.urlopen") as urlopen:
+            report_sync.revalidate_site()
+        urlopen.assert_not_called()
+        self.assertIn("KTP_SITE_REVALIDATE_SECRET", err.getvalue())
+
+    def test_sends_the_scope_and_secret_the_endpoint_expects(self):
+        seen = []
+
+        def fake_urlopen(req, timeout=None):
+            seen.append(req)
+            return FakeResponse()
+
+        with mock.patch.dict("os.environ", self.WITH_SECRET), \
+                mock.patch("urllib.request.urlopen", fake_urlopen):
+            report_sync.revalidate_site()
+        self.assertEqual(len(seen), 1)
+        req = seen[0]
+        self.assertEqual(req.full_url,
+                         "https://ktpleague.gg/api/internal/revalidate")
+        self.assertEqual(req.get_header("X-internal-revalidate"), "s3cr3t")
+        self.assertEqual(json.loads(req.data), {"scope": "ktp"})
+
+    def test_the_secret_value_never_reaches_a_log_line(self):
+        err = io.StringIO()
+        with mock.patch.dict("os.environ", self.WITH_SECRET), \
+                mock.patch("sys.stderr", err), \
+                mock.patch("urllib.request.urlopen",
+                           side_effect=http_error(401)):
+            report_sync.revalidate_site()
+        self.assertNotIn("s3cr3t", err.getvalue())
+
+    def test_a_401_is_not_retried(self):
+        err = io.StringIO()
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            raise http_error(401)
+
+        with mock.patch.dict("os.environ", self.WITH_SECRET), \
+                mock.patch("sys.stderr", err), \
+                mock.patch("urllib.request.urlopen", fake_urlopen):
+            report_sync.revalidate_site()  # must not raise
+        self.assertEqual(len(calls), 1)
+        self.assertIn("FAILED", err.getvalue())
+
+    def test_a_5xx_is_retried_once_then_gives_up(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            raise http_error(503)
+
+        with mock.patch.dict("os.environ", self.WITH_SECRET), \
+                mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("urllib.request.urlopen", fake_urlopen):
+            report_sync.revalidate_site()  # must not raise
+        self.assertEqual(len(calls), 2)
+
+    def test_a_timeout_is_retried_once_then_gives_up(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            raise TimeoutError("timed out")
+
+        with mock.patch.dict("os.environ", self.WITH_SECRET), \
+                mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("urllib.request.urlopen", fake_urlopen):
+            report_sync.revalidate_site()  # must not raise
+        self.assertEqual(len(calls), 2)
+
+    def test_succeeds_on_the_retry(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise http_error(502)
+            return FakeResponse()
+
+        with mock.patch.dict("os.environ", self.WITH_SECRET), \
+                mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("urllib.request.urlopen", fake_urlopen):
+            report_sync.revalidate_site()
+        self.assertEqual(len(calls), 2)
+
+
+class TestRevalidateTrigger(unittest.TestCase):
+    """main()'s decision whether to call revalidate_site() at all."""
+
+    ENV = {"KTP_SUPABASE_URL": "https://x.test", "KTP_SUPABASE_SECRET_KEY": "k"}
+
+    def _run(self, argv, n):
+        calls = []
+        with mock.patch.dict("os.environ", self.ENV), \
+                mock.patch.object(report_sync, "sync_reports",
+                                  lambda dry_run, since: n), \
+                mock.patch.object(report_sync, "sync_aggregates",
+                                  lambda dry_run: 0), \
+                mock.patch.object(report_sync, "revalidate_site",
+                                  lambda: calls.append(1)):
+            rc = report_sync.main(argv)
+        return rc, calls
+
+    def test_called_once_after_a_sync_that_changed_something(self):
+        rc, calls = self._run(["--since", "2026-09-13"], n=2)
+        self.assertEqual((rc, calls), (0, [1]))
+
+    def test_not_called_when_nothing_changed(self):
+        rc, calls = self._run(["--since", "2026-09-13"], n=0)
+        self.assertEqual((rc, calls), (0, []))
+
+    def test_not_called_on_a_dry_run_even_with_rows_pending(self):
+        """--dry-run never POSTs to Supabase, so there is nothing for the
+        site to see yet -- revalidating would purge a still-accurate cache."""
+        rc, calls = self._run(["--since", "2026-09-13", "--dry-run"], n=3)
+        self.assertEqual((rc, calls), (0, []))
+
+
+class TestRevalidateNeverFailsTheRun(unittest.TestCase):
+    """End to end through main(): a broken revalidate must not turn a
+    successful sync into a non-zero exit or a raised exception."""
+
+    ENV = {"KTP_SUPABASE_URL": "https://x.test", "KTP_SUPABASE_SECRET_KEY": "k",
+          "KTP_SITE_REVALIDATE_SECRET": "s3cr3t"}
+
+    def _run_main(self, urlopen_side_effect):
+        with mock.patch.dict("os.environ", self.ENV), \
+                mock.patch.object(report_sync, "sync_reports",
+                                  lambda dry_run, since: 1), \
+                mock.patch.object(report_sync, "sync_aggregates",
+                                  lambda dry_run: 0), \
+                mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("urllib.request.urlopen",
+                           side_effect=urlopen_side_effect):
+            return report_sync.main(["--since", "2026-09-13"])
+
+    def test_run_succeeds_when_revalidate_gets_a_401(self):
+        self.assertEqual(self._run_main(http_error(401)), 0)
+
+    def test_run_succeeds_when_revalidate_gets_5xx_on_every_attempt(self):
+        self.assertEqual(self._run_main(http_error(503)), 0)
+
+    def test_run_succeeds_when_revalidate_times_out_on_every_attempt(self):
+        self.assertEqual(self._run_main(TimeoutError("timed out")), 0)
+
+
 class TestExceptHook(unittest.TestCase):
     """Under `python3 -m`, a foreign excepthook (apport, on the data server)
     must not replace the real traceback."""
