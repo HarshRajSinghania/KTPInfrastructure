@@ -17,7 +17,9 @@ from scripts.accumulation_v3 import load_profile, score_match, validate_facts
 from scripts.build_automated_match_report import build_bundle
 from scripts.life_impact_v4 import derive_life_impact
 from scripts.match_analytics import (
+    capture_stream_authorized,
     evaluate_capture_authorization,
+    lifecycle_block,
     evaluate_position_provenance,
     grenade_entity_summary,
     objective_attempt_summary,
@@ -553,17 +555,23 @@ SELECT server_id, half, attempt_id, event_kind, stop_reason
 FROM ktp_objective_attempt_events
 WHERE match_id={match} AND half>0
 ORDER BY half, event_epoch, producer_sequence
-""") if capture_authorization["authorized"] else []
+""") if capture_stream_authorized(
+        capture_authorization, "objective_attempt") else []
     grenade_entity_rows = _rows(db, "grenade_entities", f"""
 SELECT server_id, half, entindex, serial, entity_kind, weapon_id, weapon_type
 FROM ktp_grenade_entity_events
 WHERE match_id={match} AND half>0
 ORDER BY half, event_epoch, producer_sequence
-""") if capture_authorization["authorized"] else []
+""") if capture_stream_authorized(
+        capture_authorization, "grenade_entity") else []
     telemetry_lifecycles = {
         "privacy": "aggregate_only_no_entity_or_position_detail",
-        "objective_attempts": objective_attempt_summary(objective_attempt_rows),
-        "grenade_entities": grenade_entity_summary(grenade_entity_rows),
+        "objective_attempts": lifecycle_block(
+            capture_authorization, "objective_attempt",
+            objective_attempt_summary, objective_attempt_rows),
+        "grenade_entities": lifecycle_block(
+            capture_authorization, "grenade_entity",
+            grenade_entity_summary, grenade_entity_rows),
     }
     sides, stable_teams = _stable_and_side_teams(samples, roster_team)
     side_stable_votes: dict[tuple[int, int], list[int]] = defaultdict(list)

@@ -365,6 +365,72 @@ SELECT
     return {name: bool(int(value)) for name, value in rows[0].items()}
 
 
+def _half_scoped(rows: list[dict[str, Any]], key: str) -> int:
+    return max((int(row.get(key) or 0) for row in rows), default=0)
+
+
+def _half_sequence_errors(
+    half: int, rows: list[dict[str, Any]], intake_shortfall: int,
+) -> list[str]:
+    """Half-wide sequence evidence that no single stream can own.
+
+    `sequence_gap_count` and `duplicate_or_reordered_count` are HALF-scoped:
+    the daemon reads both from its per-half sequence state and stamps the same
+    value into every event type's row, while daemon_received/rejected and
+    correlation_failure_count are indexed by event type. A gap is non-zero even
+    on a stream that emitted nothing, which cannot be that stream's.
+
+    A gap is UDP intake loss on the shared producer sequence, and the daemon's
+    own measurement is that it equals the summed per-stream
+    `emitted - daemon_received` -- so it is already charged to the stream that
+    lost the line, and re-charging the half total to every stream would leave
+    them coupled. Only a residual no stream accounts for is match-level. Not a
+    loss tolerance: the attributed part still fails its own stream.
+    """
+    errors = []
+    duplicates = _half_scoped(rows, "duplicate_or_reordered_count")
+    if duplicates:
+        errors.append(
+            f"half {half} reports {duplicates} duplicate or reordered line(s) "
+            "on the shared producer sequence")
+    residual = _half_scoped(rows, "sequence_gap_count") - intake_shortfall
+    if residual > 0:
+        errors.append(
+            f"half {half} has {residual} sequence-gap line(s) no stream's "
+            "emitted/received shortfall accounts for")
+    return errors
+
+
+def capture_stream_status(
+    capture: dict[str, Any], event_type: str,
+) -> dict[str, Any]:
+    """Authorization for ONE capture stream, with the reason it was withheld.
+
+    A stream whose capture reconciles publishes even when a sibling failed --
+    a frag correlation failure is not evidence about the objective stream.
+    """
+    entry = (capture.get("stream_authorization") or {}).get(event_type)
+    if entry is None:
+        status = str(capture.get("status") or "not_captured")
+        return {
+            "authorized": False,
+            "status": status if status != "authorized" else "withheld",
+            "reason": "; ".join(capture.get("errors") or [])
+                      or "capture telemetry is absent for this match",
+        }
+    if entry.get("authorized"):
+        return {"authorized": True, "status": "authorized", "reason": ""}
+    reason = "; ".join(entry.get("errors") or [])
+    return {
+        "authorized": False, "status": "withheld",
+        "reason": reason or "capture authorization failed",
+    }
+
+
+def capture_stream_authorized(capture: dict[str, Any], event_type: str) -> bool:
+    return bool(capture_stream_status(capture, event_type)["authorized"])
+
+
 def evaluate_capture_authorization(
     observed_halves: set[int],
     manifests: list[dict[str, Any]],
@@ -372,7 +438,24 @@ def evaluate_capture_authorization(
     *,
     require_activation: bool = False,
 ) -> dict[str, Any]:
-    """Validate schema-22/23 capture authorization without vacuous passes."""
+    """Validate schema-22/23 capture authorization without vacuous passes.
+
+    Authorization is PER STREAM, across every observed half. The streams are
+    independent in the data and only the gate coupled them, so one stream's
+    loss no longer withholds a sibling's rows. Across-halves rather than
+    per-half because every consumer queries a stream for the whole match:
+    publishing half 1 and dropping half 2 would produce a partial aggregate
+    with nothing marking it partial -- the defect this split exists to fix.
+
+    `match_errors` are the preconditions that bind every stream at once (the
+    manifest contract, and the half sets the health rows are read against).
+    Those still fail the whole match: with them broken, no stream's counters
+    can be trusted to describe the halves they claim.
+
+    Match-level `status`/`authorized` keep their meaning -- every precondition
+    holds and every stream reconciles -- so consumers that read them are
+    unaffected.
+    """
     expected_types = set(CAPTURE_EVENT_TYPES)
     observed = {int(half) for half in observed_halves if int(half) > 0}
     if not manifests and not health:
@@ -380,14 +463,21 @@ def evaluate_capture_authorization(
             "status": "not_captured", "authorized": False,
             "observed_halves": sorted(observed), "manifest_halves": [],
             "health_halves": [], "streams": {}, "errors": [],
+            "match_errors": [], "stream_authorization": {},
+            "authorized_streams": [],
         }
-    errors: list[str] = []
+    match_errors: list[str] = []
+    stream_errors: dict[str, list[str]] = {}
+
+    def stream_error(event_type: str, message: str) -> None:
+        stream_errors.setdefault(event_type or "<empty>", []).append(message)
+
     manifest_halves = [int(row.get("half") or 0) for row in manifests]
     health_halves = {int(row.get("half") or 0) for row in health}
     if set(manifest_halves) != observed or len(manifest_halves) != len(observed):
-        errors.append("manifest half set/count does not equal observed match halves")
+        match_errors.append("manifest half set/count does not equal observed match halves")
     if health_halves != observed:
-        errors.append("health half set does not equal observed match halves")
+        match_errors.append("health half set does not equal observed match halves")
     for row in manifests:
         capabilities = {
             item.strip() for item in str(row.get("capabilities") or "").split(",")
@@ -405,7 +495,7 @@ def evaluate_capture_authorization(
             or abs(float(row.get("position_interval") or 0) - 2.0) > 0.01
             or not {"objective_attempt", "grenade_entity"}.issubset(capabilities)
         ):
-            errors.append(f"half {row.get('half')} manifest is not schema22+/2.00 authorized")
+            match_errors.append(f"half {row.get('half')} manifest is not schema22+/2.00 authorized")
         if require_activation:
             producer_activation = row.get("producer_activation_epoch")
             activation_receipt = row.get("activation_receipt_epoch")
@@ -413,14 +503,14 @@ def evaluate_capture_authorization(
             try:
                 int(producer_activation)
             except (TypeError, ValueError):
-                errors.append(
+                match_errors.append(
                     f"half {row.get('half')} manifest producer activation "
                     "epoch is missing"
                 )
             try:
                 receipt_epoch = int(activation_receipt)
             except (TypeError, ValueError):
-                errors.append(
+                match_errors.append(
                     f"half {row.get('half')} manifest activation receipt "
                     "epoch is missing"
                 )
@@ -428,13 +518,13 @@ def evaluate_capture_authorization(
                 try:
                     start_epoch = int(match_start)
                 except (TypeError, ValueError):
-                    errors.append(
+                    match_errors.append(
                         f"half {row.get('half')} match start epoch is missing"
                     )
                 else:
                     latency = receipt_epoch - start_epoch
                     if not 0 <= latency <= 3:
-                        errors.append(
+                        match_errors.append(
                             f"half {row.get('half')} manifest activation "
                             "receipt latency "
                             f"{latency}s is outside inclusive 0..3s policy"
@@ -446,14 +536,22 @@ def evaluate_capture_authorization(
         observed_types = set(types)
         missing = expected_types - observed_types
         unknown = observed_types - expected_types - set(CAPTURE_EVENT_TYPES_OPTIONAL)
-        if missing:
-            errors.append(
+        for event_type in sorted(missing):
+            # A dark stream is that stream's own failure. The wording keeps the
+            # "health type" phrase callers and tests match on.
+            stream_error(
+                event_type,
                 f"half {half} is missing health type(s) {sorted(missing)}")
         if unknown:
-            errors.append(
+            # Unattributable to any contracted stream: a producer/daemon
+            # disagreement puts every stream's counters in doubt.
+            match_errors.append(
                 f"half {half} carries unknown health type(s) {sorted(unknown)}")
-        if len(types) != len(observed_types):
-            errors.append(f"half {half} repeats a health type")
+        for event_type in sorted(
+            name for name in observed_types if types.count(name) > 1
+        ):
+            stream_error(event_type, f"half {half} repeats a health type")
+        intake_shortfall = 0
         for row in rows:
             event_type = str(row.get("event_type") or "")
             counters = {
@@ -464,6 +562,8 @@ def evaluate_capture_authorization(
                     "duplicate_or_reordered_count",
                 )
             }
+            intake_shortfall += max(
+                0, counters["emitted"] - counters["daemon_received"])
             if (
                 min(counters.values()) < 0
                 or counters["attempted"] != counters["enqueued"] + counters["dropped"]
@@ -473,10 +573,11 @@ def evaluate_capture_authorization(
                     != counters["daemon_received"]
                 or any(counters[key] for key in (
                     "dropped", "daemon_rejected", "correlation_failure_count",
-                    "sequence_gap_count", "duplicate_or_reordered_count",
                 ))
             ):
-                errors.append(f"half {half} {event_type or '<empty>'} counters do not reconcile")
+                stream_error(
+                    event_type,
+                    f"half {half} {event_type or '<empty>'} counters do not reconcile")
             stream = streams.setdefault(event_type, {
                 "attempted": 0, "enqueued": 0, "emitted": 0,
                 "received": 0, "accepted": 0,
@@ -487,14 +588,45 @@ def evaluate_capture_authorization(
                 ("accepted", "daemon_accepted"),
             ):
                 stream[target] += counters[source]
+        match_errors += _half_sequence_errors(half, rows, intake_shortfall)
+    match_ok = not match_errors and bool(observed)
+    # Every contracted stream gets a verdict, plus any optional stream the
+    # producer actually emitted. An unknown type is already a match error, so
+    # it never reaches here as an authorized stream.
+    reported = sorted(
+        expected_types
+        | {name for name in CAPTURE_EVENT_TYPES_OPTIONAL if name in streams}
+    )
+    stream_authorization = {}
+    for name in reported:
+        own = stream_errors.get(name, [])
+        stream_authorization[name] = {
+            "authorized": match_ok and not own,
+            "status": "authorized" if match_ok and not own else "withheld",
+            # A broken match precondition outranks the stream's own state:
+            # its counters describe halves that cannot be trusted either way.
+            "scope": None if match_ok and not own else
+                     "match" if not match_ok else "stream",
+            "errors": (match_errors + own) if not match_ok else own,
+        }
+    errors = match_errors + [
+        error for name in sorted(stream_errors) for error in stream_errors[name]
+    ]
+    authorized = match_ok and not stream_errors
     return {
-        "status": "authorized" if not errors and bool(observed) else "invalid",
-        "authorized": not errors and bool(observed),
+        "status": "authorized" if authorized else "invalid",
+        "authorized": authorized,
         "observed_halves": sorted(observed),
         "manifest_halves": sorted(set(manifest_halves)),
         "health_halves": sorted(health_halves),
         "streams": streams,
         "errors": errors,
+        "match_errors": match_errors,
+        "stream_authorization": stream_authorization,
+        "authorized_streams": sorted(
+            name for name, entry in stream_authorization.items()
+            if entry["authorized"]
+        ),
     }
 
 
@@ -511,7 +643,11 @@ def evaluate_position_provenance(
         observed_halves, manifests, health,
         require_activation=require_activation,
     )
-    errors = list(capture.get("errors") or [])
+    # Position provenance rides on the position stream, not on its siblings:
+    # a frag correlation failure is not evidence about position capture.
+    position_capture = capture_stream_status(capture, "position")
+    position_entry = (capture.get("stream_authorization") or {}).get("position") or {}
+    errors = list(position_entry.get("errors") or [])
     observed = {int(half) for half in observed_halves if int(half) > 0}
     manifest_by_half: dict[int, dict[str, Any]] = {}
     revisions: set[str] = set()
@@ -588,7 +724,7 @@ def evaluate_position_provenance(
     if persistence_mismatch_halves:
         errors.append("persisted position rows do not reconcile with accepted health counters")
 
-    authorized = capture["authorized"] and not errors and bool(observed)
+    authorized = position_capture["authorized"] and not errors and bool(observed)
     return {
         "status": "authorized" if authorized else "not_captured" if not manifests else "invalid",
         "authorized": authorized,
@@ -978,6 +1114,27 @@ def grenade_entity_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def lifecycle_block(
+    capture: dict[str, Any],
+    event_type: str,
+    summarise: Any,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """A stream's lifecycle summary, or a withheld marker that says why.
+
+    A withheld stream must stay visible with its reason; the silent absence is
+    the defect per-stream authorization exists to fix.
+    """
+    state = capture_stream_status(capture, event_type)
+    if state["authorized"]:
+        return summarise(rows)
+    return {
+        "status": state["status"],
+        "stream": event_type,
+        "withheld_reason": state["reason"],
+    }
+
+
 def build_duel_matrix(
     frag_timeline: list[dict[str, Any]],
     players: list[dict[str, Any]],
@@ -1095,6 +1252,14 @@ def markdown_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) -
     for row in rows:
         lines.append("| " + " | ".join(md(row.get(key)) for key, _ in columns) + " |")
     return "\n".join(lines) + "\n"
+
+
+def lifecycle_line(block: dict[str, Any], counts: str) -> str:
+    """Counts when the stream published; otherwise the reason it was withheld."""
+    if block.get("status") == "available":
+        return counts
+    reason = block.get("withheld_reason") or "capture telemetry is absent for this match"
+    return f"**Withheld** — this stream's capture did not authorize: {md(reason)}"
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -1352,21 +1517,27 @@ def render_markdown(report: dict[str, Any]) -> str:
         ]),
         "", "## Objective-attempt lifecycle", "",
         f"Status: `{objective_attempts.get('status', 'not_captured')}`  ",
-        f"Attempts: {md(objective_attempts.get('attempts'))}; "
-        f"starts: {md(objective_attempts.get('starts'))}; "
-        f"completes: {md(objective_attempts.get('completes'))}; "
-        f"stops: {md(objective_attempts.get('stops'))}; "
-        f"orphan terminals: {md(objective_attempts.get('orphan_terminals'))}; "
-        f"open attempts: {md(objective_attempts.get('open_attempts'))}.",
+        lifecycle_line(
+            objective_attempts,
+            f"Attempts: {md(objective_attempts.get('attempts'))}; "
+            f"starts: {md(objective_attempts.get('starts'))}; "
+            f"completes: {md(objective_attempts.get('completes'))}; "
+            f"stops: {md(objective_attempts.get('stops'))}; "
+            f"orphan terminals: {md(objective_attempts.get('orphan_terminals'))}; "
+            f"open attempts: {md(objective_attempts.get('open_attempts'))}.",
+        ),
         "Missing starts and terminals remain explicitly censored; the report does not invent them.",
         "", "## Grenade-entity lifecycle", "",
         f"Status: `{grenade_entities.get('status', 'not_captured')}`  ",
-        f"Entities: {md(grenade_entities.get('entities'))}; "
-        f"tracked: {md(grenade_entities.get('tracked'))}; "
-        f"removed: {md(grenade_entities.get('removed'))}; "
-        f"complete: {md(grenade_entities.get('complete_lifecycles'))}; "
-        f"incomplete tracked: {md(grenade_entities.get('incomplete_tracked'))}; "
-        f"left-censored removed: {md(grenade_entities.get('left_censored_removed'))}.",
+        lifecycle_line(
+            grenade_entities,
+            f"Entities: {md(grenade_entities.get('entities'))}; "
+            f"tracked: {md(grenade_entities.get('tracked'))}; "
+            f"removed: {md(grenade_entities.get('removed'))}; "
+            f"complete: {md(grenade_entities.get('complete_lifecycles'))}; "
+            f"incomplete tracked: {md(grenade_entities.get('incomplete_tracked'))}; "
+            f"left-censored removed: {md(grenade_entities.get('left_censored_removed'))}.",
+        ),
         "Removal is only an entity-lifecycle observation. No damage outcome is inferred.",
         "", "## Data quality", "",
         "| Result | Check | Detail |", "|---|---|---|",
@@ -1405,10 +1576,12 @@ def build_report(
     )
     sources = dict(sources)
     sources["objective_attempts"] = bool(
-        sources.get("objective_attempts") and capture_authorization["authorized"]
+        sources.get("objective_attempts")
+        and capture_stream_authorized(capture_authorization, "objective_attempt")
     )
     sources["grenade_entities"] = bool(
-        sources.get("grenade_entities") and capture_authorization["authorized"]
+        sources.get("grenade_entities")
+        and capture_stream_authorized(capture_authorization, "grenade_entity")
     )
     match_rows = query_rows(db, "match_fact.sql", match_id)
     players = query_rows(db, "player_match_fact.sql", match_id)
@@ -1738,15 +1911,13 @@ def build_report(
         "capture_events": events,
         "telemetry_lifecycles": {
             "privacy": "aggregate_public_private_timeline",
-            "objective_attempts": (
-                objective_attempt_summary(objective_attempts)
-                if capture_authorization["authorized"]
-                else {"status": capture_authorization["status"]}
+            "objective_attempts": lifecycle_block(
+                capture_authorization, "objective_attempt",
+                objective_attempt_summary, objective_attempts,
             ),
-            "grenade_entities": (
-                grenade_entity_summary(grenade_entities)
-                if capture_authorization["authorized"]
-                else {"status": capture_authorization["status"]}
+            "grenade_entities": lifecycle_block(
+                capture_authorization, "grenade_entity",
+                grenade_entity_summary, grenade_entities,
             ),
             "private_facts": {
                 "objective_attempt_timeline": objective_attempts,

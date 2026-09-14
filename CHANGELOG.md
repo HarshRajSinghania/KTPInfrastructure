@@ -4,6 +4,56 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: capture authorization is per stream, not per match (2026-09-14)
+
+Operator ruling 2026-09-14. `evaluate_capture_authorization` marked a match
+unauthorized on any non-zero drop, reject, correlation failure, sequence gap or
+duplicate in any half, across all eleven streams together, and `build_report`
+gated `objective_attempts` and `grenade_entities` on that one verdict. A frag
+correlation failure therefore withheld the objective stream, whose own counters
+reconciled exactly — and it withheld it silently.
+
+Measured on the nine official S10 matches that have reports: one authorized
+under the old gate; eight now authorize at least one stream that previously
+published nothing. `objective_attempts` appears on six of them and
+`grenade_entities` on five.
+
+- **Unit of authorization: one stream, across every observed half.** Consumers
+  query a stream for the whole match, so a per-half verdict would publish half 1
+  and drop half 2 as an aggregate with nothing marking it partial.
+- **Still per-match, still fails everything:** the manifest contract (schema 22+,
+  the 2.00s cadence, the declared capabilities, activation receipt latency), the
+  manifest and health half sets against the observed halves, and an unknown
+  health type — a producer/daemon disagreement is not attributable to a stream.
+- **`sequence_gap_count` and `duplicate_or_reordered_count` are HALF-scoped, not
+  per-stream.** The daemon reads both from the per-half sequence state and
+  stamps the same value into every event type's row, while
+  `daemon_received`/`daemon_rejected`/`correlation_failure_count` are indexed by
+  event type. Measured across 328 live halves: both are identical across all
+  eleven streams in every half, and a sequence gap is non-zero on 133 halves
+  where the stream emitted nothing. A sequence gap is UDP intake loss, and the
+  daemon's own measurement is that it equals the sum of per-stream
+  `emitted - daemon_received` — so it is charged to the stream that lost the
+  line, and only a residual no stream accounts for fails the match. Charging the
+  half total to all eleven would have left them coupled.
+- **No loss tolerance.** One dropped, rejected or correlation-failed line still
+  fails its own stream. What changed is only that it stops failing the others.
+  Match-level `status`/`authorized` keep their old meaning exactly — every
+  precondition holds and every stream reconciles — so consumers that read them
+  are unaffected. The report DTO is unchanged (`analytics-report-dto-v1.2.0`,
+  report schema 11); neither field crosses into it.
+- **A withheld stream is visible with its reason.** `telemetry_lifecycles` now
+  carries `status: withheld` with `stream` and `withheld_reason`, and the
+  markdown renders the reason in place of the counts. Silent absence was the
+  defect.
+- New in the authorization result: `stream_authorization`, `authorized_streams`
+  and `match_errors`; `errors` still carries every error. New helpers
+  `capture_stream_status` / `capture_stream_authorized`.
+- Position provenance now rides on the `position` stream alone, and
+  `match_readiness`'s objective and grenade lifecycle checks on theirs.
+- krod's runbook step 3b ("lost and gaps 0 or close to it = OK") contradicts
+  this: there is no "close to it". Flagged for him, not edited.
+
 ### `scripts`: the public demo archive is searchable by player (2026-09-14)
 
 `ktp-fastdl-indexes.py` writes `/demos/players.html`: search by name, `STEAM_0:`/`STEAM_1:`,

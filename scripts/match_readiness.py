@@ -27,6 +27,7 @@ from typing import Any, Iterable, Iterator
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.match_analytics import (  # noqa: E402
     MATCH_ID_RE,
+    capture_stream_authorized,
     evaluate_capture_authorization,
     evaluate_position_provenance,
 )
@@ -608,7 +609,7 @@ def validate_fixture(path: Path, match_id: str | None = None) -> dict[str, Any]:
     )
     objective_reconciled = len(objective_attempts) == objective_expected
     objective_ok = (
-        capture_authorization["authorized"]
+        capture_stream_authorized(capture_authorization, "objective_attempt")
         and objective_reconciled and objective_shape_ok
     )
     checks.append(finding(
@@ -631,7 +632,7 @@ def validate_fixture(path: Path, match_id: str | None = None) -> dict[str, Any]:
     )
     grenade_reconciled = len(grenade_entities) == grenade_expected
     grenade_ok = (
-        capture_authorization["authorized"]
+        capture_stream_authorized(capture_authorization, "grenade_entity")
         and grenade_reconciled and grenade_shape_ok
     )
     checks.append(finding(
