@@ -313,7 +313,7 @@ The provisioning script applies these optimizations automatically:
 
 | Optimization | Value | Purpose |
 |--------------|-------|---------|
-| **Kernel** | lowlatency | 1000Hz tick rate, full preemption |
+| **Kernel** | lowlatency | Full preemption (on 24.04 the generic kernel is also 1000Hz; the difference is preemption) |
 | **CPU Governor** | performance | No frequency scaling delays |
 | **C-States** | C3/C6 disabled | No 59-80µs wake latency |
 | **NMI Watchdog** | disabled | Eliminates watchdog micro-stutters |
