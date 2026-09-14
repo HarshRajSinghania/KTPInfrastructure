@@ -48,9 +48,23 @@ published nothing. `objective_attempts` appears on six of them and
   defect.
 - New in the authorization result: `stream_authorization`, `authorized_streams`
   and `match_errors`; `errors` still carries every error. New helpers
-  `capture_stream_status` / `capture_stream_authorized`.
+  `capture_stream_status` / `capture_stream_authorized`. The result is embedded
+  whole in the report JSON, so those keys do appear there — the artifact grows
+  even though the validated DTO does not.
 - Position provenance now rides on the `position` stream alone, and
   `match_readiness`'s objective and grenade lifecycle checks on theirs.
+  `METRIC_REQUIREMENTS` drops `schema22_capture_authorization` from
+  `positional_impact` and `objective_control`: their per-stream checks already
+  fail on every match-level precondition, so keeping both would have left
+  eligibility coupled while the checks beside it said otherwise.
+- `lane_b_match_report`'s schema22 profile gate stays **match-level on purpose**
+  and now says so: the profile declares it needs an authorized capture, and
+  `prepare_lane_b_pages` hard-requires the `available` lifecycle shape, so
+  splitting it per stream means teaching that validator the withheld shape in
+  the same change.
+- A half carrying a repeated or unknown health type credits no intake shortfall
+  against its sequence gaps — a duplicated row would otherwise double-count one
+  stream's loss and absorb a residual that belongs to nobody.
 - krod's runbook step 3b ("lost and gaps 0 or close to it = OK") contradicts
   this: there is no "close to it". Flagged for him, not edited.
 

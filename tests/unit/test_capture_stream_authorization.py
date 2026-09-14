@@ -145,6 +145,45 @@ def test_an_unaccounted_sequence_gap_still_fails_the_whole_match():
     assert any("no stream" in error for error in result["match_errors"])
 
 
+def test_a_repeated_health_row_cannot_absorb_an_unaccounted_gap():
+    """A duplicated row would double-count its stream's shortfall and launder a
+    residual into every sibling's publish decision."""
+    manifests, health = _two_half_evidence()
+    for row in health:
+        if row["half"] == 1:
+            row["sequence_gap_count"] = 2
+    _break_stream(health, "frag", 1, "daemon_received", 0)
+    _break_stream(health, "frag", 1, "daemon_accepted", 0)
+    health.append(dict(next(r for r in health
+                            if r["half"] == 1 and r["event_type"] == "frag")))
+    result = _authorize_two_halves(manifests, health)
+
+    assert result["authorized_streams"] == []
+    assert any("no stream" in error for error in result["match_errors"])
+
+
+def test_a_withheld_streams_reason_never_names_a_sibling():
+    manifests, health = _two_half_evidence()
+    health[:] = [row for row in health
+                 if not (row["half"] == 1 and row["event_type"] in ("frag", "assist"))]
+    result = _authorize_two_halves(manifests, health)
+
+    reason = analytics.capture_stream_status(result, "frag")["reason"]
+    assert "frag" in reason
+    assert "assist" not in reason
+
+
+def test_a_match_with_no_capture_at_all_reads_as_not_captured():
+    """Nothing failed to authorize; there was never anything to authorize."""
+    capture = analytics.evaluate_capture_authorization({1}, [], [])
+    block = analytics.lifecycle_block(
+        capture, "objective_attempt", analytics.objective_attempt_summary, [])
+
+    assert block["status"] == "not_captured"
+    assert analytics.lifecycle_line(block, "COUNTS").startswith("**Not captured**")
+    assert "did not authorize" not in analytics.lifecycle_line(block, "COUNTS")
+
+
 def test_a_duplicate_or_reordered_line_still_fails_the_whole_match():
     manifests, health = _two_half_evidence()
     for row in health:

@@ -257,7 +257,7 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
     assert report["in_game_result"]["flags"] == ["observer-root-not-configured"]
     # A withheld stream names itself and says why: the silent absence is the
     # defect per-stream authorization exists to fix.
-    absent = "capture telemetry is absent for this match"
+    absent = "no capture telemetry was recorded for this match"
     assert report["telemetry_lifecycles"] == {
         "privacy": "aggregate_public_private_timeline",
         "objective_attempts": {

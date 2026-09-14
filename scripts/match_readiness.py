@@ -70,10 +70,14 @@ FORBIDDEN_PUBLIC_KEY_TOKENS = {
 
 # These are source-quality prerequisites, not score thresholds. Consumers must
 # not turn an eligibility state into a numerical score without their own policy.
+#
+# Neither capture-bearing metric names `schema22_capture_authorization`: its
+# per-stream successor already fails on every match-level precondition, so
+# requiring both would only re-impose the sibling coupling the split removed.
 METRIC_REQUIREMENTS = {
     "positional_impact": (
         "closed_match", "positions_present", "valid_half_tags",
-        "position_sampling_interval", "schema22_capture_authorization",
+        "position_sampling_interval",
         "schema23_position_provenance",
         "frag_coordinate_coverage", "damage_position_alignment",
     ),
@@ -83,7 +87,7 @@ METRIC_REQUIREMENTS = {
         "damage_position_alignment",
     ),
     "objective_control": (
-        "closed_match", "valid_half_tags", "schema22_capture_authorization",
+        "closed_match", "valid_half_tags",
         "objective_attempt_lifecycle", "flag_ownership_coverage",
     ),
 }

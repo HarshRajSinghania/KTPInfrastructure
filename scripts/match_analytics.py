@@ -374,18 +374,10 @@ def _half_sequence_errors(
 ) -> list[str]:
     """Half-wide sequence evidence that no single stream can own.
 
-    `sequence_gap_count` and `duplicate_or_reordered_count` are HALF-scoped:
-    the daemon reads both from its per-half sequence state and stamps the same
-    value into every event type's row, while daemon_received/rejected and
-    correlation_failure_count are indexed by event type. A gap is non-zero even
-    on a stream that emitted nothing, which cannot be that stream's.
-
-    A gap is UDP intake loss on the shared producer sequence, and the daemon's
-    own measurement is that it equals the summed per-stream
-    `emitted - daemon_received` -- so it is already charged to the stream that
-    lost the line, and re-charging the half total to every stream would leave
-    them coupled. Only a residual no stream accounts for is match-level. Not a
-    loss tolerance: the attributed part still fails its own stream.
+    Both counters are HALF-scoped -- the daemon stamps one per-half value into
+    every event type's row, so a gap is non-zero even on a stream that emitted
+    nothing. A gap is intake loss already charged to the stream whose `emitted`
+    exceeds its `daemon_received`; only the unaccounted residual is match-level.
     """
     errors = []
     duplicates = _half_scoped(rows, "duplicate_or_reordered_count")
@@ -411,12 +403,10 @@ def capture_stream_status(
     """
     entry = (capture.get("stream_authorization") or {}).get(event_type)
     if entry is None:
-        status = str(capture.get("status") or "not_captured")
+        # No per-stream verdict exists only when nothing was captured at all.
         return {
-            "authorized": False,
-            "status": status if status != "authorized" else "withheld",
-            "reason": "; ".join(capture.get("errors") or [])
-                      or "capture telemetry is absent for this match",
+            "authorized": False, "status": "not_captured",
+            "reason": "no capture telemetry was recorded for this match",
         }
     if entry.get("authorized"):
         return {"authorized": True, "status": "authorized", "reason": ""}
@@ -537,11 +527,11 @@ def evaluate_capture_authorization(
         missing = expected_types - observed_types
         unknown = observed_types - expected_types - set(CAPTURE_EVENT_TYPES_OPTIONAL)
         for event_type in sorted(missing):
-            # A dark stream is that stream's own failure. The wording keeps the
-            # "health type" phrase callers and tests match on.
+            # A dark stream is that stream's own failure, and its reason is
+            # rendered to operators -- so it must not name its siblings.
             stream_error(
                 event_type,
-                f"half {half} is missing health type(s) {sorted(missing)}")
+                f"half {half} is missing the {event_type} health type")
         if unknown:
             # Unattributable to any contracted stream: a producer/daemon
             # disagreement puts every stream's counters in doubt.
@@ -551,7 +541,7 @@ def evaluate_capture_authorization(
             name for name in observed_types if types.count(name) > 1
         ):
             stream_error(event_type, f"half {half} repeats a health type")
-        intake_shortfall = 0
+        shortfall_by_type: dict[str, int] = {}
         for row in rows:
             event_type = str(row.get("event_type") or "")
             counters = {
@@ -562,8 +552,9 @@ def evaluate_capture_authorization(
                     "duplicate_or_reordered_count",
                 )
             }
-            intake_shortfall += max(
-                0, counters["emitted"] - counters["daemon_received"])
+            shortfall_by_type.setdefault(
+                event_type,
+                max(0, counters["emitted"] - counters["daemon_received"]))
             if (
                 min(counters.values()) < 0
                 or counters["attempted"] != counters["enqueued"] + counters["dropped"]
@@ -588,7 +579,12 @@ def evaluate_capture_authorization(
                 ("accepted", "daemon_accepted"),
             ):
                 stream[target] += counters[source]
-        match_errors += _half_sequence_errors(half, rows, intake_shortfall)
+        # A repeated or unknown type means the half's rows cannot be trusted to
+        # account for its gaps, so credit nothing and let the residual stand.
+        match_errors += _half_sequence_errors(
+            half, rows,
+            0 if unknown or len(types) != len(observed_types)
+            else sum(shortfall_by_type.values()))
     match_ok = not match_errors and bool(observed)
     # Every contracted stream gets a verdict, plus any optional stream the
     # producer actually emitted. An unknown type is already a match error, so
@@ -645,7 +641,7 @@ def evaluate_position_provenance(
     )
     # Position provenance rides on the position stream, not on its siblings:
     # a frag correlation failure is not evidence about position capture.
-    position_capture = capture_stream_status(capture, "position")
+    position_authorized = capture_stream_authorized(capture, "position")
     position_entry = (capture.get("stream_authorization") or {}).get("position") or {}
     errors = list(position_entry.get("errors") or [])
     observed = {int(half) for half in observed_halves if int(half) > 0}
@@ -724,7 +720,7 @@ def evaluate_position_provenance(
     if persistence_mismatch_halves:
         errors.append("persisted position rows do not reconcile with accepted health counters")
 
-    authorized = position_capture["authorized"] and not errors and bool(observed)
+    authorized = position_authorized and not errors and bool(observed)
     return {
         "status": "authorized" if authorized else "not_captured" if not manifests else "invalid",
         "authorized": authorized,
@@ -1255,10 +1251,16 @@ def markdown_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) -
 
 
 def lifecycle_line(block: dict[str, Any], counts: str) -> str:
-    """Counts when the stream published; otherwise the reason it was withheld."""
-    if block.get("status") == "available":
+    """Counts when the stream published; otherwise the reason it was withheld.
+
+    Keyed on the marker `lifecycle_block` writes, not on a summariser's status
+    string, so a new summariser state cannot silently render as withheld.
+    """
+    reason = block.get("withheld_reason")
+    if reason is None:
         return counts
-    reason = block.get("withheld_reason") or "capture telemetry is absent for this match"
+    if block.get("status") == "not_captured":
+        return f"**Not captured** — {md(reason)}"
     return f"**Withheld** — this stream's capture did not authorize: {md(reason)}"
 
 
