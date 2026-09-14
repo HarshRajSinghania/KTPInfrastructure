@@ -14,8 +14,11 @@ User=ktpreports
 Group=ktpreports
 WorkingDirectory=/opt/ktp-reports/KTPInfrastructure
 
-# KTP_SUPABASE_URL and KTP_SUPABASE_SECRET_KEY. Only report_sync reads them;
-# the two report_service steps are local-socket mysql and need no secret.
+# KTP_SUPABASE_URL, KTP_SUPABASE_SECRET_KEY and KTP_SITE_REVALIDATE_SECRET.
+# Only report_sync reads them; the two report_service steps are local-socket
+# mysql and need no secret. KTP_SITE_REVALIDATE_SECRET is optional -- report_sync
+# logs a warning and skips the site cache refresh when it is unset, it never
+# fails the run.
 EnvironmentFile=/etc/ktp/reports.env
 
 # Three steps, in this order. systemd runs ExecStart lines sequentially and
