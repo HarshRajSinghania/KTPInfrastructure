@@ -48,6 +48,9 @@ local `.sql` or `.sql.gz` match fixture without starting MySQL or contacting a
 shared service. `build_anzio_spatial_atlas.ps1` turns one or more Anzio fixtures
 into the supported heatmap/report image set. Map geometry and analytical
 windows live in `config/analytics/spatial_maps/dod_anzio.json`.
+`spatial_map_geometry.py` turns a map's `overview` block into the
+world-to-overview projection pair the match report draws with; it refuses a
+`ROTATED 1` overview rather than guess the axis swap.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
