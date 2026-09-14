@@ -57,6 +57,49 @@ skipped — `/var/log` is group-writable here, and a stanza logrotate refuses is
 silent (see `scripts/README-hltv-connection-logging.md`). No unit change, no
 `daemon-reload`, no restart.
 
+### `scripts`: grenade viewmodels return to the manifest at severity `review` (2026-09-13)
+
+The 2026-09-13 ruling was revised the same day. `models/v_grenade.mdl`,
+`v_mills.mdl` and `v_stick.mdl` stay allowed at any hash and must never be
+scored — but a modified copy has to reach an admin again, and excluding them
+could not do that. The client hashes only the paths the manifest lists, so an
+excluded path is unobservable rather than forgiven: no comparison, no capture,
+nothing in the bundle. `review` is the severity that separates the two, and it
+is not new — `gfx/env/*` has shipped at it since 2026-08-27.
+
+- `build-game-files-manifest.py` takes the three out of `EXCLUDED_EXACT` and
+  into a new `REVIEW_EXACT`, which `severity_for` consults beside
+  `REVIEW_PATH_PREFIXES`. `models/` cannot be a prefix rule without releasing
+  the weapon kit, so the set is matched whole. Their explicit emit block comes
+  back unchanged.
+- **Operator ruling 2026-09-14: the two `ALTERNATE_HASHES` entries for
+  `v_grenade` and `v_stick` are REMOVED, so every modified copy is captured —
+  the known community pack included.** An `AllowedAlternateHashes` match hits
+  `continue` before the `IsReview` branch, so an alternate is precisely what
+  stops a copy being taken. Visibility is the point of the revised ruling, and
+  "we already recognise this one" is not a reason to withhold its bytes.
+  ⚠️ This supersedes an earlier revision of this entry, which kept them.
+- That also squares the two allowlists. KTPAntiCheat dropped both paths from
+  `KnownBenignFileVariants` once they became allowed at any hash; all three
+  `BenignVariantManifestSyncTests` now pass against the regenerated manifest
+  (checked by running their logic over AC `origin/main`'s table, not assumed) —
+  6 manifest alternate pairs, 6 client pairs, identical. Keeping the alternates
+  would have left `EveryManifestAlternate_IsAlsoInTheClientAllowlist` naming
+  them, so the PR closes a guard rather than leaving one red.
+- Capture volume: the three viewmodels are 262/332/220 KB, so a player with all
+  three modified spends 0.79 MB of the 12 MB per-scan asset budget and 3 of its
+  16-file cap (`afraznein/KTPAntiCheat`#207). Comfortable.
+- `categorize()` now names the three `grenade_model` itself. The `.res` route
+  called them `model_other` while the explicit route said `grenade_model`, and
+  the dossier prints the category. Caught by the new tests, not by review.
+- `p_`/`w_` grenade models are untouched and stay violations.
+- Tests: 13, up from 9. They assert presence and severity together, because
+  either alone passes for the wrong manifest.
+- Deploy: regenerate and install `/opt/ktp-ac-api/game_files_manifest.json`
+  (operator). The live manifest is still the pre-#346 one, so installing this
+  changes three `severity` fields to `review` and removes two
+  `allowed_alternate_hashes` lists — nothing else.
+
 ### `scripts`, `sql`, `config`: match reports carry kill streaks, per-side weapon and duel splits, and per-class rows (2026-09-14)
 
 Builds items 1-5 of `docs/proposals/streaks-and-side-splits.md`. Report schema
