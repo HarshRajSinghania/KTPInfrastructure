@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.match_analytics import (  # noqa: E402
     MATCH_ID_RE,
     capture_stream_authorized,
+    capture_stream_status,
     evaluate_capture_authorization,
     evaluate_position_provenance,
 )
@@ -71,13 +72,14 @@ FORBIDDEN_PUBLIC_KEY_TOKENS = {
 # These are source-quality prerequisites, not score thresholds. Consumers must
 # not turn an eligibility state into a numerical score without their own policy.
 #
-# Neither capture-bearing metric names `schema22_capture_authorization`: its
-# per-stream successor already fails on every match-level precondition, so
-# requiring both would only re-impose the sibling coupling the split removed.
+# Neither capture-bearing metric names `schema22_capture_authorization`: each
+# names its own stream's verdict instead, which already fails on every
+# match-level precondition. Requiring both would re-impose the sibling coupling
+# the per-stream split removed.
 METRIC_REQUIREMENTS = {
     "positional_impact": (
         "closed_match", "positions_present", "valid_half_tags",
-        "position_sampling_interval",
+        "position_sampling_interval", "position_capture_authorization",
         "schema23_position_provenance",
         "frag_coordinate_coverage", "damage_position_alignment",
     ),
@@ -683,6 +685,24 @@ def validate_fixture(path: Path, match_id: str | None = None) -> dict[str, Any]:
         captured_bsp_sha256=position_provenance["captured_bsp_sha256"],
         schema23_declared=schema23_declared,
         authorization_errors=position_provenance["errors"],
+    ))
+    # The position stream's own verdict, graded on whether telemetry exists at
+    # all -- the sibling of objective_attempt_lifecycle. `positional_impact`
+    # needs it because schema23_position_provenance only reaches FAIL once a
+    # manifest declares schema 23, so a schema-22 archive whose position
+    # capture is broken would otherwise grade WARN and stay partially eligible.
+    position_stream = capture_stream_status(capture_authorization, "position")
+    checks.append(finding(
+        "PASS" if position_stream["authorized"] else
+        "FAIL" if telemetry_present else "WARN",
+        "position_capture_authorization",
+        "The position stream's capture reconciles for every observed half."
+        if position_stream["authorized"] else
+        "Position capture telemetry was not captured in this archive."
+        if not telemetry_present else
+        "The position stream's capture does not reconcile.",
+        authorized=position_stream["authorized"],
+        withheld_reason=position_stream["reason"],
     ))
 
     duplicate_specs = (

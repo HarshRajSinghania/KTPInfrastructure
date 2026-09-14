@@ -430,21 +430,11 @@ def evaluate_capture_authorization(
 ) -> dict[str, Any]:
     """Validate schema-22/23 capture authorization without vacuous passes.
 
-    Authorization is PER STREAM, across every observed half. The streams are
-    independent in the data and only the gate coupled them, so one stream's
-    loss no longer withholds a sibling's rows. Across-halves rather than
-    per-half because every consumer queries a stream for the whole match:
-    publishing half 1 and dropping half 2 would produce a partial aggregate
-    with nothing marking it partial -- the defect this split exists to fix.
-
-    `match_errors` are the preconditions that bind every stream at once (the
-    manifest contract, and the half sets the health rows are read against).
-    Those still fail the whole match: with them broken, no stream's counters
-    can be trusted to describe the halves they claim.
-
-    Match-level `status`/`authorized` keep their meaning -- every precondition
-    holds and every stream reconciles -- so consumers that read them are
-    unaffected.
+    Authorization is PER STREAM, across every observed half -- across-halves
+    because consumers query a stream for the whole match, so a per-half verdict
+    would publish a partial aggregate with nothing marking it partial.
+    `match_errors` are the preconditions that bind every stream at once and
+    still fail the match. Match-level `status`/`authorized` keep their meaning.
     """
     expected_types = set(CAPTURE_EVENT_TYPES)
     observed = {int(half) for half in observed_halves if int(half) > 0}

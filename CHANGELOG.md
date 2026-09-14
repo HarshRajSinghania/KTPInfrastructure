@@ -56,7 +56,12 @@ published nothing. `objective_attempts` appears on six of them and
   `METRIC_REQUIREMENTS` drops `schema22_capture_authorization` from
   `positional_impact` and `objective_control`: their per-stream checks already
   fail on every match-level precondition, so keeping both would have left
-  eligibility coupled while the checks beside it said otherwise.
+  eligibility coupled while the checks beside it said otherwise. A new
+  `position_capture_authorization` check carries `positional_impact` — dropping
+  the match-level one alone would have loosened it, because
+  `schema23_position_provenance` only reaches FAIL once a manifest declares
+  schema 23, so a schema-22 archive with broken position capture would have
+  graded WARN and stayed partially eligible.
 - `lane_b_match_report`'s schema22 profile gate stays **match-level on purpose**
   and now says so: the profile declares it needs an authorized capture, and
   `prepare_lane_b_pages` hard-requires the `available` lifecycle shape, so

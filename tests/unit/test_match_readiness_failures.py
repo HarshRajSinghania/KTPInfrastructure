@@ -404,3 +404,36 @@ def test_bot_identity_in_production_match_fails_containment(monkeypatch, tmp_pat
     report = validate(monkeypatch, tmp_path, tables)
     assert report["status"] == "FAIL"
     assert finding(report, "bot_containment")["level"] == "FAIL"
+
+
+def test_a_frag_failure_no_longer_makes_objective_control_ineligible(monkeypatch, tmp_path):
+    """The coupling the per-stream split removed, at the eligibility layer."""
+    tables = healthy_tables()
+    for row in tables["ktp_capture_health"]:
+        if row["event_type"] == "frag":
+            row["correlation_failure_count"] = "1"
+    report = validate(monkeypatch, tmp_path, tables)
+
+    assert finding(report, "schema22_capture_authorization")["level"] == "FAIL"
+    assert finding(report, "objective_attempt_lifecycle")["level"] == "PASS"
+    eligibility = report["metric_eligibility"]["metrics"]["objective_control"]
+    assert eligibility["status"] == "available"
+    assert "schema22_capture_authorization" not in eligibility["required_checks"]
+
+
+def test_a_broken_position_stream_still_blocks_positional_impact(monkeypatch, tmp_path):
+    """schema23_position_provenance only reaches FAIL once a manifest declares
+    schema 23, so a schema-22 archive needs the position stream's own verdict."""
+    tables = healthy_tables()
+    for row in tables["ktp_capture_manifests"]:
+        row["schema_version"] = "22"
+    for row in tables["ktp_capture_health"]:
+        if row["event_type"] == "position":
+            row["daemon_rejected"] = row["daemon_accepted"]
+            row["daemon_accepted"] = "0"
+    report = validate(monkeypatch, tmp_path, tables)
+
+    assert finding(report, "position_capture_authorization")["level"] == "FAIL"
+    positional = report["metric_eligibility"]["metrics"]["positional_impact"]
+    assert positional["status"] == "unavailable"
+    assert "position_capture_authorization" in positional["blocking_checks"]
