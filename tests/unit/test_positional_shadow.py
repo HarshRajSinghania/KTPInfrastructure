@@ -114,6 +114,35 @@ class Synthetic(unittest.TestCase):
         self.assertNotIn(2, by)
 
 
+class DepthUnit(unittest.TestCase):
+    """mean_depth is a clamped lane fraction, never a coordinate: players far
+    behind their own flag read 0 and players far past the enemy flag read 1."""
+
+    def test_depth_stays_inside_zero_one(self):
+        rows = []
+        for step in range(300):
+            t = 2.0 * step
+            deep = t >= 30.0  # after the orientation window team 1 runs past the far flag
+            for k in range(6):
+                rows.append({"player_id": 1 + k, "team": 1, "half": 1,
+                             "pos_x": 12000.0 if deep else -3000.0,
+                             "pos_y": 10.0 * k, "game_time": t})
+                rows.append({"player_id": 7 + k, "team": 2, "half": 1,
+                             "pos_x": 9000.0, "pos_y": 10.0 * k, "game_time": t})
+        out = build_positional_shadow(rows, FLAGS, [], PLAYERS,
+                                      PositionalConfig(min_position_samples=100))
+        players = out["depth_profiles"]["players"]
+        self.assertEqual(len(players), 12)
+        for p in players:
+            self.assertGreaterEqual(p["mean_depth"], 0.0)
+            self.assertLessEqual(p["mean_depth"], 1.0)
+            self.assertLessEqual(p["depth_sd"], 0.5)
+        by = {p["player_id"]: p for p in players}
+        self.assertEqual(by[7]["mean_depth"], 0.0)       # past their own end: clamped
+        self.assertGreater(by[1]["mean_depth"], 0.9)     # past the enemy end: near 1
+        self.assertLessEqual(by[1]["mean_depth"], 1.0)
+
+
 @unittest.skipUnless(SPECIMENS and Path(SPECIMENS).is_dir(), "KTP_REPORT_SPECIMENS not set")
 class PrototypeReproduction(unittest.TestCase):
     """Rebuild 1.3-6736-ATL1 from the cached feeds and compare with the

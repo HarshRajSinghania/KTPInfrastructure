@@ -26,7 +26,9 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-CONTRACT_VERSION = "analytics-report-dto-v1.0.0"
+from scripts.in_game_result import unavailable as in_game_unavailable
+
+CONTRACT_VERSION = "analytics-report-dto-v1.1.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
 
 # hlstatsx DATETIMEs are naive league-local time: the data server runs
 # America/New_York. The website column is timestamptz, which reads a naive
@@ -366,17 +368,86 @@ def sanitize_report(report: dict) -> dict:
         },
         "lane_analytics": _positional_block(se, names_by_id),
         "spatial": _spatial_block(report),
+        "in_game_result": _in_game_result_block(report),
+        "player_halves": _player_halves_block(report),
     }
     assert_sanitized(dto)
     return dto
+
+
+IN_GAME_RESULT_HALF_FIELDS = (
+    "half", "team1_points", "team2_points", "team1_cumulative",
+    "team2_cumulative", "team1_side", "team2_side",
+)
+
+
+def _in_game_result_block(report: dict) -> dict:
+    """The engine's team score (scripts/in_game_result.py), not the league
+    result. A report built before schema 10 has none and reads unavailable."""
+    r = report.get("in_game_result")
+    if not r:
+        return in_game_unavailable("not-in-report")
+    winner = r.get("winner")
+    return {
+        "status": r.get("status"),
+        "flags": list(r.get("flags") or []),
+        "authority": r.get("authority"),
+        "source": r.get("source"),
+        "producer": r.get("producer"),
+        "notice": r.get("notice"),
+        "team1_score": _num(r.get("team1_score")),
+        "team2_score": _num(r.get("team2_score")),
+        "winner": winner if winner == "draw" else _num(winner),
+        "halves": [{k: (h.get(k) if k.endswith("_side") else _num(h.get(k)))
+                    for k in IN_GAME_RESULT_HALF_FIELDS}
+                   for h in r.get("halves") or []],
+    }
+
+
+PLAYER_HALF_FIELDS = (
+    "half", "duration_seconds", "kills", "deaths", "assists", "headshots",
+    "team_kills", "suicides", "damage_dealt", "damage_taken", "team_damage",
+    "damage_differential", "capture_credits", "cap_breaks", "shots", "hits",
+    "kd_ratio", "headshot_rate", "raw_accuracy", "damage_per_minute",
+    "kills_per_minute",
+)
+
+
+def _player_halves_block(report: dict) -> dict:
+    """Per-half box score (scripts/player_halves.py). `team` is the match team
+    number, not the side played that half."""
+    ph = report.get("player_halves") or {}
+    return {
+        "status": ph.get("status", "unavailable"),
+        "reconciled": ph.get("reconciled"),
+        "mismatched_columns": list(ph.get("mismatched_columns") or []),
+        "rows": [
+            {"name": _name(p.get("player_name_at_match")), "team": _num(p.get("team"))}
+            | {k: _num(p.get(k)) for k in PLAYER_HALF_FIELDS}
+            for p in ph.get("rows") or []
+        ],
+    }
+
+
+DEPTH_UNITS = {
+    "mean_depth": "lane_fraction_own_end_0_enemy_end_1",
+    "depth_sd": "lane_fraction",
+    "lateral_mean": "world_units",
+}
 
 
 def _positional_block(se: dict, names_by_id: dict) -> dict:
     """Positional shadow (WEBSITE_POSITIONAL_ANALYTICS_PLAN_20260906 §2):
     team-level control curve (GREEN), per-player overextension scalars
     (GREEN), per-player depth profile scalars (aggregate, identity-attached —
-    user sign-off recorded in the plan). No coordinates cross: depth is a
-    0..1 lane position, lateral is a mean distance."""
+    user sign-off recorded in the plan). No coordinates cross.
+
+    depth_profiles units: mean_depth and depth_sd are fractions of the lane,
+    the polyline through the map's flag origins in flag order, with 0 at the
+    player's own end and 1 at the enemy end for that half. Each sample is
+    clamped to [0, 1], so a player behind their last flag reads 0, not less.
+    lateral_mean is the mean perpendicular distance from that line in world
+    units."""
     mc = se.get("map_control") or {}
     dp = se.get("depth_profiles") or {}
     ov = se.get("overextension") or {}
@@ -401,7 +472,7 @@ def _positional_block(se: dict, names_by_id: dict) -> dict:
             "mean_control_team1": _num(mc.get("mean_control_team1")),
             "bins": dict(mc.get("bins") or {}),
         },
-        "depth_profiles": envelope(dp) | {"players": [
+        "depth_profiles": envelope(dp) | {"units": dict(DEPTH_UNITS), "players": [
             {"name": _name(p.get("player_name_at_match"))
              or names_by_id.get(p.get("player_id")),
              "team": p.get("team"), "samples": _num(p.get("samples")),

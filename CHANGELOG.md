@@ -4,6 +4,36 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: match reports carry the in-game result and per-half player rows; `mean_depth` unit stated (2026-09-13)
+
+The public match report had to read its score from the website's `ktp.match`,
+had match totals only, and rendered `depth_profiles.mean_depth` on a guess.
+Report schema 9 -> 10, website contract `analytics-report-dto-v1.0.0` -> `v1.1.0`
+(additive; the site accepts any `analytics-report-dto-v1.` prefix).
+
+- `in_game_result`: per-half points, cumulative score and side per team, total
+  and winner or `draw`, read from the game engine's team score in the HUD
+  observer's settled `events.jsonl` through the importer's strict reader
+  (`scripts/in_game_result.py`). It is the in-game score, not the
+  captain-reported league result, and says so in `authority` and `notice`.
+  The close of a half is its last `final` row; the 0/0 scoreboard reset at the
+  start of half 2 is ignored; `ktp_match_end` is checked in half-1 side terms.
+  Missing, late-starting, mis-carried or disagreeing streams publish
+  `status: unavailable` with a flag and no score.
+- `player_halves`: one row per player per closed half from
+  `sql/analytics/player_half_fact.sql` (same tables as the box score; assists
+  and cap breaks placed by event time), with `reconciled` saying whether the
+  halves add up to the match totals.
+- `lane_analytics.depth_profiles.units`: `mean_depth`/`depth_sd` are a fraction
+  of the lane through the flag origins, 0 = own end, 1 = enemy end, clamped to
+  [0, 1]; `lateral_mean` is world units.
+- `report_service generate --observer-root` (default `/opt/hud-observer/matches`).
+- The v1.1.0 contract doc also describes `ratings.ktpr_v2.display_scale`
+  (#350), which shipped without a version change: a v1.1.0 row always
+  carries it, a v1.0.0 row may not.
+- Deploy regenerates every in-season match at schema 10 on the next tick, and
+  report_sync inserts them as new rows (the site reads the highest id).
+
 ### `scripts`, `provision`, `docs`: game hosts rank lowlatency kernels by flavour instead of by menu position (2026-09-13)
 
 Ubuntu's `10_linux` sorts kernels by version first, so a generic kernel published ahead of its

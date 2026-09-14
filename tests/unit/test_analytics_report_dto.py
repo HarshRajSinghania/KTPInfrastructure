@@ -373,6 +373,66 @@ class Sanitize(unittest.TestCase):
         self.assertEqual(pos["map_control"]["status"], "unavailable")
         self.assertEqual(pos["overextension"]["players"], [])
 
+    def test_contract_is_additive_within_v1(self):
+        """The website accepts any row whose contract starts with this prefix."""
+        self.assertTrue(CONTRACT_VERSION.startswith("analytics-report-dto-v1."))
+        self.assertNotEqual(CONTRACT_VERSION, "analytics-report-dto-v1.0.0")
+
+    def test_depth_units_are_stated(self):
+        dp = sanitize_report(internal_report())["lane_analytics"]["depth_profiles"]
+        self.assertEqual(dp["units"]["mean_depth"], "lane_fraction_own_end_0_enemy_end_1")
+        self.assertEqual(dp["units"]["lateral_mean"], "world_units")
+
+    def test_in_game_result_is_whitelisted(self):
+        rep = internal_report()
+        rep["in_game_result"] = {
+            "status": "complete", "flags": [], "authority": "in_game_team_score",
+            "source": "engine-team-score-v1", "producer": "KTPHudObserver",
+            "notice": "In-game team score", "team1_score": 25, "team2_score": "273",
+            "winner": 2, "stream_path": "/opt/secret",
+            "halves": [{"half": 1, "team1_points": 12, "team2_points": 142,
+                        "team1_cumulative": 12, "team2_cumulative": 142,
+                        "team1_side": "Axis", "team2_side": "Allies",
+                        "allies_team_slot": 2}]}
+        r = sanitize_report(rep)["in_game_result"]
+        self.assertEqual((r["team1_score"], r["team2_score"], r["winner"]), (25, 273, 2))
+        self.assertEqual(r["halves"][0]["team2_side"], "Allies")
+        body = json.dumps(r)
+        self.assertNotIn("stream_path", body)
+        self.assertNotIn("slot", body)
+
+    def test_in_game_draw_survives(self):
+        rep = internal_report()
+        rep["in_game_result"] = {"status": "complete", "winner": "draw",
+                                 "team1_score": 5, "team2_score": 5, "halves": []}
+        self.assertEqual(sanitize_report(rep)["in_game_result"]["winner"], "draw")
+
+    def test_a_report_without_in_game_result_is_unavailable_not_zero(self):
+        r = sanitize_report(internal_report())["in_game_result"]
+        self.assertEqual((r["status"], r["flags"]), ("unavailable", ["not-in-report"]))
+        self.assertIsNone(r["team1_score"])
+        self.assertIsNone(r["winner"])
+
+    def test_player_halves_named_without_ids(self):
+        rep = internal_report()
+        rep["player_halves"] = {"status": "available", "reconciled": True,
+                                "mismatched_columns": [], "rows": [
+            {"player_id": 7, "steam_id": "0:123", "player_name_at_match": "SavageÂ¬",
+             "team": 1, "half": 2, "kills": "4", "damage_dealt": None,
+             "position_samples": 400}]}
+        ph = sanitize_report(rep)["player_halves"]
+        self.assertTrue(ph["reconciled"])
+        row = ph["rows"][0]
+        self.assertEqual((row["name"], row["half"], row["kills"]), ("Savage¬", 2, 4))
+        self.assertIsNone(row["damage_dealt"])
+        body = json.dumps(ph)
+        for bad in ("player_id", "steam_id", "0:123", "position_samples"):
+            self.assertNotIn(bad, body)
+
+    def test_player_halves_absent_is_unavailable(self):
+        ph = sanitize_report(internal_report())["player_halves"]
+        self.assertEqual((ph["status"], ph["rows"]), ("unavailable", []))
+
     def test_duels_cross_team_only(self):
         d = sanitize_report(internal_report())["duels"]
         self.assertEqual(d, [{"killer": "A", "victim": "B", "kills": 2}])
