@@ -27,8 +27,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from scripts.in_game_result import unavailable as in_game_unavailable
+from scripts.kill_streaks import DEFINITION as KILL_STREAK_DEFINITION
+from scripts.kill_streaks import DEFINITION_VERSION as KILL_STREAK_DEFINITION_VERSION
 
-CONTRACT_VERSION = "analytics-report-dto-v1.1.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
+CONTRACT_VERSION = "analytics-report-dto-v1.2.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
 
 # hlstatsx DATETIMEs are naive league-local time: the data server runs
 # America/New_York. The website column is timestamptz, which reads a naive
@@ -259,7 +261,8 @@ def sanitize_report(report: dict) -> dict:
                 "damage_differential", "capture_credits", "cap_breaks",
                 "shots", "hits", "raw_accuracy", "kd_ratio",
                 "damage_per_minute", "kills_per_minute", "damage_per_life",
-                "headshot_rate", "fast_2k", "fast_3k", "fast_4k_plus")}
+                "headshot_rate", "fast_2k", "fast_3k", "fast_4k_plus",
+                "best_streak")}
             for p in report.get("players") or []
         ],
         "weapons": [
@@ -370,6 +373,10 @@ def sanitize_report(report: dict) -> dict:
         "spatial": _spatial_block(report),
         "in_game_result": _in_game_result_block(report),
         "player_halves": _player_halves_block(report),
+        "kill_streaks": _kill_streaks_block(report),
+        "weapon_sides": _weapon_sides_block(report),
+        "duels_by_side": _duels_by_side_block(report),
+        "player_classes": _player_classes_block(report),
     }
     assert_sanitized(dto)
     return dto
@@ -409,22 +416,149 @@ PLAYER_HALF_FIELDS = (
     "team_kills", "suicides", "damage_dealt", "damage_taken", "team_damage",
     "damage_differential", "capture_credits", "cap_breaks", "shots", "hits",
     "kd_ratio", "headshot_rate", "raw_accuracy", "damage_per_minute",
-    "kills_per_minute",
+    "kills_per_minute", "best_streak",
 )
 
 
 def _player_halves_block(report: dict) -> dict:
     """Per-half box score (scripts/player_halves.py). `team` is the match team
-    number, not the side played that half."""
+    number; `side` is the side played that half."""
     ph = report.get("player_halves") or {}
     return {
         "status": ph.get("status", "unavailable"),
         "reconciled": ph.get("reconciled"),
         "mismatched_columns": list(ph.get("mismatched_columns") or []),
         "rows": [
-            {"name": _name(p.get("player_name_at_match")), "team": _num(p.get("team"))}
+            {"name": _name(p.get("player_name_at_match")), "team": _num(p.get("team")),
+             "side": _side(p.get("side"))}
             | {k: _num(p.get(k)) for k in PLAYER_HALF_FIELDS}
             for p in ph.get("rows") or []
+        ],
+    }
+
+
+SIDES = ("Allies", "Axis")
+
+
+def _side(value):
+    return value if value in SIDES else None
+
+
+def _not_in_report(rows_key: str = "rows") -> dict:
+    return {"status": "unavailable", "flags": ["not-in-report"], rows_key: []}
+
+
+KILL_STREAK_COVERAGE = (
+    "ordered_frags", "recovered_frags", "unordered_frags", "kills_after_own_death",
+)
+
+
+def _kill_streaks_block(report: dict) -> dict:
+    """kill_streak_v1 (scripts/kill_streaks.py). A report built before schema 11
+    has none and reads unavailable, never zero."""
+    ks = report.get("kill_streaks")
+    if not ks:
+        return {"definition": KILL_STREAK_DEFINITION,
+                "definition_version": KILL_STREAK_DEFINITION_VERSION,
+                "coverage": {k: None for k in KILL_STREAK_COVERAGE},
+                "players": []} | _not_in_report()
+    coverage = ks.get("coverage") or {}
+    return {
+        "definition": ks.get("definition"),
+        "definition_version": _num(ks.get("definition_version")),
+        "status": ks.get("status"),
+        "flags": list(ks.get("flags") or []),
+        "coverage": {k: _num(coverage.get(k)) for k in KILL_STREAK_COVERAGE},
+        "rows": [
+            {"name": _name(r.get("player_name_at_match")), "team": _num(r.get("team")),
+             "half": _num(r.get("half")), "side": _side(r.get("side")),
+             "kills": _num(r.get("kills")), "best_streak": _num(r.get("best_streak")),
+             "streaks_3_plus": _num(r.get("streaks_3_plus")),
+             "lower_bound": bool(r.get("lower_bound"))}
+            for r in ks.get("rows") or []
+        ],
+        "players": [
+            {"name": _name(p.get("player_name_at_match")), "team": _num(p.get("team")),
+             "best_streak": _num(p.get("best_streak")),
+             "by_side": {s: _num((p.get("by_side") or {}).get(s)) for s in SIDES},
+             "lower_bound": bool(p.get("lower_bound"))}
+            for p in ks.get("players") or []
+        ],
+    }
+
+
+WEAPON_SIDE_FIELDS = ("kills", "headshot_kills", "shots", "hits", "damage_dealt")
+
+
+def _weapon_sides_block(report: dict) -> dict:
+    """Weapon totals per player per half under the side the PLAYER held, so a
+    picked-up enemy weapon stays under the player's side."""
+    ws = report.get("weapon_sides")
+    if not ws:
+        return {"reconciled": None, "mismatched_columns": [],
+                "unsided_kills": None} | _not_in_report()
+    return {
+        "status": ws.get("status"),
+        "flags": list(ws.get("flags") or []),
+        "reconciled": ws.get("reconciled"),
+        "mismatched_columns": list(ws.get("mismatched_columns") or []),
+        "unsided_kills": _num(ws.get("unsided_kills")),
+        "rows": [
+            {"name": _name(r.get("player_name_at_match")), "team": _num(r.get("team")),
+             "half": _num(r.get("half")), "side": _side(r.get("side")),
+             "weapon": r.get("weapon")}
+            | {k: _num(r.get(k)) for k in WEAPON_SIDE_FIELDS}
+            for r in ws.get("rows") or []
+        ],
+    }
+
+
+def _duels_by_side_block(report: dict) -> dict:
+    """duels[] split by the killer's side; cross-team cells only, as in duels[]."""
+    ds = report.get("duels_by_side")
+    if not ds:
+        return {"reconciled": None, "unsided_kills": None} | _not_in_report("cells")
+    return {
+        "status": ds.get("status"),
+        "flags": list(ds.get("flags") or []),
+        "reconciled": ds.get("reconciled"),
+        "unsided_kills": _num(ds.get("unsided_kills")),
+        "cells": [
+            {"killer": _name(c.get("killer_name")), "victim": _name(c.get("victim_name")),
+             "killer_side": _side(c.get("killer_side")), "kills": _num(c.get("kills"))}
+            for c in ds.get("cells") or []
+            if c.get("cross_team")
+        ],
+    }
+
+
+PLAYER_CLASS_FIELDS = ("lives", "kills", "deaths", "headshot_kills")
+PLAYER_CLASS_COVERAGE = (
+    "lives", "lives_mapped", "kills_classed", "kills_unclassed",
+    "deaths_classed", "deaths_unclassed",
+)
+
+
+def _player_classes_block(report: dict) -> dict:
+    """Per-class rows from the class read at spawn. No accuracy: shots carry no
+    class or time at the source."""
+    pc = report.get("player_classes")
+    if not pc:
+        return {"coverage": {k: None for k in PLAYER_CLASS_COVERAGE}
+                | {"unmapped_class_ids": []}} | _not_in_report()
+    coverage = pc.get("coverage") or {}
+    return {
+        "status": pc.get("status"),
+        "flags": list(pc.get("flags") or []),
+        "coverage": {k: _num(coverage.get(k)) for k in PLAYER_CLASS_COVERAGE}
+        | {"unmapped_class_ids": [_num(c) for c in coverage.get("unmapped_class_ids") or []]},
+        "rows": [
+            {"name": _name(r.get("player_name_at_match")), "team": _num(r.get("team")),
+             "half": _num(r.get("half")), "side": _side(r.get("side")),
+             "class_id": _num(r.get("class_id")), "class_code": r.get("class_code"),
+             "class_name": r.get("class_name")}
+            | {k: _num(r.get(k)) for k in PLAYER_CLASS_FIELDS}
+            for r in pc.get("rows") or []
         ],
     }
 

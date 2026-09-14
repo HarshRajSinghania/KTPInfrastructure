@@ -82,10 +82,16 @@ from scripts.match_timelines import (  # noqa: E402
 
 from scripts.in_game_result import load_in_game_result, unavailable as in_game_unavailable  # noqa: E402
 from scripts.player_halves import build_player_halves  # noqa: E402
+from scripts.kill_streaks import (  # noqa: E402
+    best_by_player, best_by_player_half, build_kill_streaks)
+from scripts.life_ledger import resolve_sides  # noqa: E402
+from scripts.side_splits import (  # noqa: E402
+    annotate_player_halves, build_duels_by_side, build_player_classes,
+    build_weapon_sides, load_class_map)
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 10  # 8: positional shadow blocks; 9: spatial_layers; 10: in_game_result + player_halves
+SCHEMA_VERSION = 11  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -159,11 +165,31 @@ def sql_literal(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
-def read_query(name: str, match_id: str) -> str:
+# Half expressions an analytics query may name. The first form reads the stored
+# half and runs on every archive; the second prefers the producer half and needs
+# the columns named by the capability.
+_HALF_TOKENS = {
+    "FRAG_HALF": ("frag_event_clock", "f.half",
+                  "CASE WHEN BINARY f.producer_match_id = BINARY {{MATCH_ID}} "
+                  "AND f.producer_half > 0 THEN f.producer_half ELSE f.half END"),
+    "DAMAGE_HALF": ("damage_event_clock", "de.half",
+                    "CASE WHEN BINARY de.producer_match_id = BINARY {{MATCH_ID}} "
+                    "AND de.producer_half > 0 THEN de.producer_half ELSE de.half END"),
+    "BREAK_HALF": ("break_producer_half",
+                   "(SELECT MAX(h.half) FROM halves h WHERE h.start_time <= e.eventTime)",
+                   "COALESCE(CASE WHEN BINARY e.producer_match_id = BINARY {{MATCH_ID}} "
+                   "AND e.producer_half > 0 THEN e.producer_half END, "
+                   "(SELECT MAX(h.half) FROM halves h WHERE h.start_time <= e.eventTime))"),
+}
+
+
+def read_query(name: str, match_id: str, sources: dict[str, bool] | None = None) -> str:
     path = SQL_DIR / name
-    query = path.read_text(encoding="utf-8").replace(
-        "{{MATCH_ID}}", sql_literal(match_id)
-    )
+    query = path.read_text(encoding="utf-8")
+    for token, (capability, stored, producer) in _HALF_TOKENS.items():
+        use_producer = bool((sources or {}).get(capability, False))
+        query = query.replace("{{" + token + "}}", producer if use_producer else stored)
+    query = query.replace("{{MATCH_ID}}", sql_literal(match_id))
     # This is a defense against an accidental mutating analytics file, not a
     # general SQL parser. The checked-in query files are also reviewed/tests.
     first = query.lstrip().lower()
@@ -197,8 +223,9 @@ def tsv_rows(output: str) -> list[dict[str, Any]]:
     ]
 
 
-def query_rows(db: EphemeralMysql, name: str, match_id: str) -> list[dict[str, Any]]:
-    return tsv_rows(db.sql(read_query(name, match_id)))
+def query_rows(db: EphemeralMysql, name: str, match_id: str,
+               sources: dict[str, bool] | None = None) -> list[dict[str, Any]]:
+    return tsv_rows(db.sql(read_query(name, match_id, sources)))
 
 
 def load_fixture(db: EphemeralMysql, fixture: Path) -> None:
@@ -323,6 +350,10 @@ SELECT
   EXISTS(SELECT 1 FROM hlstats_Actions
     WHERE game = 'dod' AND code = 'assist')
     AS assists,
+  ((SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'hlstats_Events_PlayerActions'
+      AND column_name IN ('producer_match_id', 'producer_half')) = 2)
+    AS break_producer_half,
   ((SELECT COUNT(*) FROM information_schema.columns
     WHERE table_schema = DATABASE() AND column_name = 'half'
       AND table_name IN ('hlstats_Events_Frags', 'hlstats_Events_Teamkills',
@@ -1125,6 +1156,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             ("grenade_kills", "Nade K"),
             ("grenade_damage", "Nade dmg"),
             ("fast_2k", "2k"), ("fast_3k", "3k"), ("fast_4k_plus", "4k+"),
+            ("best_streak", "Streak"),
         ]),
         "Raw accuracy is descriptive by weapon and is not suitable for player "
         "ranking; Garand chamber-clearing shots are not distinguishable from misses.",
@@ -1637,11 +1669,33 @@ def build_report(
         temporal_valid=source_mode != "replay",
     )
     player_halves = build_player_halves(
-        query_rows(db, "player_half_fact.sql", match_id)
+        query_rows(db, "player_half_fact.sql", match_id, sources)
         if sources.get("player_halves", False) else None,
         players_public,
         per_hit_damage=bool(sources.get("per_hit_damage", False)),
         temporal_valid=source_mode != "replay",
+    )
+    ledger_available = bool(enriched_frag_available and sources.get("life_boundaries", False))
+    kill_streaks = build_kill_streaks(
+        frag_context, life_boundaries, players_public,
+        match_id=match_id, source_available=ledger_available,
+    )
+    sides = resolve_sides(life_boundaries) if sources.get("life_boundaries", False) else {}
+    annotate_player_halves(player_halves, sides, best_by_player_half(kill_streaks))
+    match_best = best_by_player(kill_streaks)
+    for player in players_public:
+        player["best_streak"] = match_best.get(int(player["player_id"]))
+    duel_matrix = build_duel_matrix(frag_timeline, players_public)
+    weapon_sides = build_weapon_sides(
+        query_rows(db, "weapon_half_fact.sql", match_id, sources)
+        if sources.get("player_halves", False) else None,
+        weapons, sides,
+        per_hit_damage=bool(sources.get("per_hit_damage", False)),
+    )
+    duels_by_side = build_duels_by_side(frag_timeline, players_public, sides, duel_matrix)
+    player_classes = build_player_classes(
+        frag_context, life_boundaries, players_public, sides, load_class_map(),
+        match_id=match_id, source_available=ledger_available,
     )
     closed_halves = [
         (int(row["half"]), None if row["match_type"] in (None, "NULL") else int(row["match_type"]))
@@ -1671,8 +1725,12 @@ def build_report(
         "teams": team_summary(players_public),
         "players": players_public,
         "player_halves": player_halves,
+        "kill_streaks": kill_streaks,
+        "weapon_sides": weapon_sides,
+        "duels_by_side": duels_by_side,
+        "player_classes": player_classes,
         "in_game_result": in_game_result,
-        "duel_matrix": build_duel_matrix(frag_timeline, players_public),
+        "duel_matrix": duel_matrix,
         "assists": with_team_names(assists),
         "weapons": with_team_names(weapons),
         "capture_credits": with_team_names(credits),

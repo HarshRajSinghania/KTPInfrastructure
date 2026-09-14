@@ -1,9 +1,10 @@
 # Kill streaks, clutches, per-side and per-class splits: data proposal
 
-Status: proposal only. Nothing here is built, deployed or regenerated.
-Builds on open PR #348 (`site/report-dto-result-and-halves`, head `e84fe1f`,
-report schema 10, `analytics-report-dto-v1.1.0`). Everything proposed below is
-additive and targets report schema 11 / `analytics-report-dto-v1.2.0`.
+Status: items 1-5 of section 8 are built at report schema 11 /
+`analytics-report-dto-v1.2.0`; the published shapes are in
+`docs/ANALYTICS_REPORT_DTO_CONTRACT.md`, which wins where the two differ.
+Clutches (item 6) and momentum per side are not built.
+Written against PR #348 (report schema 10, `analytics-report-dto-v1.1.0`).
 
 Consumers waiting on it: the `/stats` kill streak / clutch item, the `/players`
 sprite hover (`searse/keep-the-prac`#717, per-side splits) and the player page
