@@ -12,9 +12,17 @@ the pure function; it was an emit site that kept its own hardcoded literal after
 the policy moved. Four of the five emit sites can never see a `gfx/env/` path,
 which is exactly why one of them going stale would be invisible.
 
-The partner assertion matters as much: nothing OUTSIDE `gfx/env/` may become
-`"review"`. A rule that only ever downgrades would quietly empty the manifest of
-anything that can flag a player.
+The partner assertion matters as much: nothing outside the report-only sets may
+become `"review"`. A rule that only ever downgrades would quietly empty the
+manifest of anything that can flag a player.
+
+The grenade viewmodels are the second entry in that scope, and they arrived by a
+route worth pinning: excluded outright on 2026-09-13, back at `"review"` the same
+day when the ruling was revised. Exclusion and `"review"` look interchangeable --
+both stop a player being flagged -- and they are not. The client hashes only the
+paths the manifest lists, so an excluded path can never be captured. Which is why
+these assert PRESENCE and severity together; either alone passes for the wrong
+manifest.
 
 Loaded by path with `paramiko` stubbed -- the script imports it at module scope
 and none of it is reachable here, so the Tier 1 gate does not grow an SSH
@@ -107,9 +115,10 @@ WEAPON_AND_EXPLICIT = [
 GRENADE_WORLD_MODELS = [f"models/{kind}_{nade}.mdl"
                         for kind in ("p", "w") for nade in ("grenade", "mills", "stick")]
 
-# First-person grenade viewmodels are allowed modification. The fixture offers them
-# through every route a path can enter by -- on disk, in a .res and in ktp_file.ini --
-# so restoring any one emit path for them fails the test.
+# First-person grenade viewmodels: allowed at any hash, but listed so a modified copy
+# is captured. The fixture offers them through every route a path can enter by -- on
+# disk, in a .res and in ktp_file.ini -- so a route that emits them at the wrong
+# severity is caught wherever it is.
 GRENADE_VIEWMODELS = ["models/v_grenade.mdl", "models/v_mills.mdl", "models/v_stick.mdl"]
 
 FILELIST = (["models/player/gerinf/gerinf.mdl", "sound/player/die1.wav"]
@@ -144,10 +153,14 @@ def test_skyboxes_are_in_scope_and_report_only(built):
     )
 
 
-def test_review_severity_is_confined_to_skyboxes(built):
+def test_review_severity_reaches_nothing_else(built):
+    allowed = set(SKYBOX) | set(GRENADE_VIEWMODELS)
     stray = sorted(e["path"] for e in built
-                   if e["severity"] == "review" and not e["path"].startswith("gfx/env/"))
-    assert not stray, f"only gfx/env/ is report-only; these were downgraded too: {stray}"
+                   if e["severity"] == "review" and e["path"] not in allowed)
+    assert not stray, (
+        f"only gfx/env/ and the grenade viewmodels are report-only; these were "
+        f"downgraded too: {stray}"
+    )
 
 
 def test_everything_else_still_violates(built):
@@ -160,13 +173,46 @@ def test_everything_else_still_violates(built):
         assert entry["severity"] == "violation", f"{path} must still count toward a verdict"
 
 
-def test_grenade_viewmodels_are_not_in_the_manifest(built):
-    # Absent, not downgraded: the client treats any severity other than "review" as a
-    # violation, and "review" copies the player's file into the bundle.
-    present = [p for p in GRENADE_VIEWMODELS if p in _by_path(built)]
-    assert not present, (
-        f"first-person grenade viewmodels are allowed modification; these came back: {present}"
+def test_grenade_viewmodels_are_in_scope_at_review_severity(built):
+    got = _by_path(built)
+    missing = [p for p in GRENADE_VIEWMODELS if p not in got]
+    assert not missing, (
+        f"a path the manifest omits is never hashed, so a modified copy of it can never "
+        f"be captured -- the revised ruling needs these listed: {missing}"
     )
+    for path in GRENADE_VIEWMODELS:
+        assert got[path]["severity"] == "review", (
+            f"{path} is allowed at any hash; 'violation' would flag every player running "
+            f"a custom viewmodel"
+        )
+        assert got[path]["category"] == "grenade_model", path
+
+
+def test_grenade_viewmodels_enter_even_when_no_source_lists_them(mod, tmp_path):
+    # The live ktp_file.ini stopped listing them and no .res references them, so the
+    # explicit pass is the only thing putting them in the real manifest. A fixture that
+    # feeds them in by another route would pass with that pass deleted.
+    ini = tmp_path / "ktp_file.ini"
+    ini.write_text("// header\nmodels/player/gerinf/gerinf.mdl\n")
+
+    every = RES_REFERENCED + WEAPON_AND_EXPLICIT + GRENADE_VIEWMODELS
+    ssh = FakeSSH({"dod_kraftstoff": RES_REFERENCED}, {p: f"bytes-of-{p}" for p in every})
+    got = _by_path(mod.build_manifest(ssh, DOD, str(ini)))
+
+    for path in GRENADE_VIEWMODELS:
+        assert path in got, f"{path} reached the manifest by no route at all"
+        assert got[path]["severity"] == "review", path
+
+
+def test_viewmodel_alternates_are_attached_to_their_entries(mod, built):
+    # The AC client's KnownBenignFileVariants allowlists these same (path, hash) pairs,
+    # and its BenignVariantManifestSyncTests fails on a tracked path whose allowlisted
+    # hash is missing here. Dropping the alternate while keeping the path in scope is
+    # the exact disagreement that guard exists to name.
+    manifest = mod.assemble_manifest(list(built), "fixture", DOD)
+    got = _by_path(manifest["files"])
+    for path in ("models/v_grenade.mdl", "models/v_stick.mdl"):
+        assert got[path]["allowed_alternate_hashes"] == mod.ALTERNATE_HASHES[path], path
 
 
 def test_held_and_thrown_grenade_models_still_violate(built):
@@ -195,14 +241,32 @@ def test_the_other_cosmetic_buckets_stayed_excluded(built):
 
 def test_severity_counts_partition_the_manifest(built):
     counts = Counter(e["severity"] for e in built)
+    review = len(SKYBOX) + len(GRENADE_VIEWMODELS)
     assert set(counts) == {"violation", "review"}
-    assert counts["review"] == len(SKYBOX)
-    assert counts["violation"] == len(built) - len(SKYBOX)
+    assert counts["review"] == review
+    assert counts["violation"] == len(built) - review
 
 
 def test_severity_for_reads_the_policy_tuple_not_a_literal(mod):
-    # Pins the indirection itself: the emit sites must go through severity_for,
-    # so editing REVIEW_PATH_PREFIXES is sufficient to change or revert policy.
+    # Pins the indirection itself: the emit sites must go through severity_for, so
+    # editing REVIEW_PATH_PREFIXES or REVIEW_EXACT is sufficient to change or revert policy.
     assert mod.severity_for("gfx/env/dod_kraftup.tga") == "review"
+    assert mod.severity_for("models/v_mills.mdl") == "review"
     assert mod.severity_for("models/p_garand.mdl") == "violation"
     assert mod.severity_for("gfx/shell.spr") == "violation", "prefix must not match loosely"
+    assert mod.severity_for("models/v_mills.mdl.bak") == "violation", "exact set must not match by prefix"
+
+
+def test_viewmodels_categorize_the_same_by_every_route(mod):
+    # The .res pass takes categorize() at its word while the explicit pass hardcodes the
+    # bucket. They disagreed, and the dossier prints the category.
+    for path in GRENADE_VIEWMODELS:
+        assert mod.categorize(path) == "grenade_model", path
+
+
+def test_the_viewmodels_left_the_excluded_set(mod):
+    # Belt to test_grenade_viewmodels_are_in_scope_at_review_severity's braces, one layer
+    # down: EXCLUDED_EXACT is applied at every source, so an entry left there would drop
+    # them again from a route the fixture does not happen to exercise.
+    assert not set(mod.GRENADE_VIEWMODELS) & mod.EXCLUDED_EXACT
+    assert set(mod.GRENADE_VIEWMODELS) == set(mod.REVIEW_EXACT)

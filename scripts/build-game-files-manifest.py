@@ -11,17 +11,20 @@ Three sources combined:
      actually loads: player models, player sounds — assets NOT referenced by
      any .res because they ship with stock DoD)
   3. Explicit additions (user policy: standard US-vs-Wehrmacht weapon kit
-     in p_/w_ primary variants; _l/l pose variants pruned 2026-05-13)
+     in p_/w_ primary variants + grenade viewmodels at severity "review";
+     _l/l pose variants pruned 2026-05-13)
 
 Excluded buckets (allowed modification): overviews/*, flag models
-(w_aflag/gflag/wflag), first-person grenade viewmodels
-(v_grenade/v_mills/v_stick).
+(w_aflag/gflag/wflag).
 
-Grenade viewmodels were in scope as violations from 2026-07-07 until the
-operator ruled them allowable on 2026-09-13 ("for now"). A viewmodel is only
-drawn in the holder's own hands; p_ (held, seen by others) and w_ (thrown)
-grenade models stay enforced. Reverting = take GRENADE_VIEWMODELS back out of
-EXCLUDED_EXACT and restore their emit block and ALTERNATE_HASHES entries.
+First-person grenade viewmodels (v_grenade/v_mills/v_stick) were violations
+from 2026-07-07, left the manifest entirely on 2026-09-13 when the operator
+ruled them allowable, and came back the same day at severity "review" when that
+ruling was revised: still never scored, but a modified copy is captured for an
+admin again. Excluding them could not do that -- the client only hashes paths
+the manifest lists, so an excluded path is unobservable, not merely forgiven. A
+viewmodel is drawn only in the holder's own hands; p_ (held, seen by others) and
+w_ (thrown) grenade models are a different bucket and stay enforced.
 
 Skyboxes (gfx/env/*) were an excluded bucket until 2026-08-27. They are now IN
 scope at severity "review" -- an operator POLICY REVERSAL, not a bug fix. A
@@ -67,6 +70,9 @@ REVIEW_PATH_PREFIXES = ("gfx/env/",)
 # First-person grenade viewmodels: only the holder ever sees them. p_/w_ grenade
 # models are a different bucket and stay enforced.
 GRENADE_VIEWMODELS = ("models/v_grenade.mdl", "models/v_mills.mdl", "models/v_stick.mdl")
+# Same report-only scope as REVIEW_PATH_PREFIXES, matched whole rather than by
+# prefix -- "models/" cannot be a prefix rule without releasing the weapon kit.
+REVIEW_EXACT = frozenset(GRENADE_VIEWMODELS)
 
 # Applied at every source, so a map .res or a future ktp_file.ini line cannot
 # pull one of these back in.
@@ -74,7 +80,6 @@ EXCLUDED_EXACT = {
     "models/w_aflag.mdl",
     "models/w_gflag.mdl",
     "models/w_wflag.mdl",
-    *GRENADE_VIEWMODELS,
 }
 # (pl_snow* exclusion removed 2026-07-07 — snow footsteps are back in
 # ktp_file.ini enforcement, so the manifest must cover them again.)
@@ -113,6 +118,18 @@ ALTERNATE_HASHES = {
     # KEEP IN SYNC with SummaryGenerator.KnownBenignFileVariants. The AC repo has a
     # trait-gated guard (BenignVariantManifestSyncTests) that fails naming any entry
     # present in one and missing from the other, or allowlisted for an untracked path.
+    #
+    # On a "review" path an alternate no longer decides whether anyone is flagged --
+    # nothing here can flag. It decides only whether we take a copy, and these two
+    # hashes are a community pack already adjudicated across the corpus. Collecting
+    # the twentieth byte-identical copy of it teaches an admin nothing and widens
+    # what we hold on players who did nothing.
+    "models/v_grenade.mdl": [
+        "bb8ac11263e3a9b70e342cf9210c6e2fbd36c071b2ffb985479186f28e122634",
+    ],
+    "models/v_stick.mdl": [
+        "e70850d6e491793e7c89c315dc97d9d4155cf04949ddfa9beae180a3996cd956",
+    ],
     "dod_siena.wad": [
         "249f620741e27edcb84df33510b794798d972d81acd197b6eaa4db1aafb0c60f",
     ],
@@ -195,8 +212,10 @@ def hash_remote_file(ssh, full_path):
 
 
 def severity_for(path):
-    """Severity for a manifest path: a violation unless its prefix is report-only."""
-    return "review" if any(path.startswith(p) for p in REVIEW_PATH_PREFIXES) else "violation"
+    """Severity for a manifest path: a violation unless it is in report-only scope."""
+    if path in REVIEW_EXACT or any(path.startswith(p) for p in REVIEW_PATH_PREFIXES):
+        return "review"
+    return "violation"
 
 
 def categorize(path):
@@ -218,6 +237,11 @@ def categorize(path):
         return "sprite"
     if p.startswith("models/"):
         leaf = p.split("/")[-1].replace(".mdl", "")
+        # Unambiguous, unlike p_/w_, whose prefix the weapon kit shares — so it can be
+        # settled here and every route agrees. A .res reaching one of these otherwise
+        # emits it as model_other and the dossier names the wrong bucket.
+        if leaf in ("v_grenade", "v_mills", "v_stick"):
+            return "grenade_model"
         if leaf.startswith("p_"):
             return "weapon_player_model"
         if leaf.startswith("w_"):
@@ -323,6 +347,27 @@ def build_manifest(ssh, dod_path, filelist_path):
         })
         seen.add(path)
 
+    # 3b. Grenade viewmodels — guaranteed regardless of filelist content.
+    # ktp_file.ini stopped listing them (KTPFileChecker 1bf59f6) and no .res
+    # references them, so without this pass the report-only ruling would be a
+    # policy nothing implements.
+    print(f"[build] Grenade viewmodels ({len(GRENADE_VIEWMODELS)}, severity review)...", file=sys.stderr)
+    for path in GRENADE_VIEWMODELS:
+        if path in seen:
+            continue
+        result = hash_remote_file(ssh, f"{dod_path}/{path}")
+        if result is None:
+            print(f"[build]   ⚠ {path} not found on server", file=sys.stderr)
+            continue
+        sha, size = result
+        entries.append({
+            "path": path, "sha256": sha, "size": size,
+            "origin": "explicit_2026-07-07_grenade_viewmodels",
+            "category": "grenade_model",
+            "severity": severity_for(path),
+        })
+        seen.add(path)
+
     # 4. Weapon kit families — find .mdl + _l.mdl + l.mdl variants
     print(f"[build] Weapon-kit families ({len(WEAPON_FAMILIES)})...", file=sys.stderr)
     # Drop any prior weapon model entries from the .res / filelist sources so
@@ -411,17 +456,16 @@ def assemble_manifest(entries, source_server_label, dod_path):
             "sources": dict(src_counts),
             "severity_semantics": {
                 "violation": "Mismatch is a hard violation. Reported in dossier and counts toward verdict.",
-                "review": "Mismatch surfaces in dossier as 'admin review' item, NOT a violation. Player's local file copied into session bundle's review_files/ subdirectory for admin inspection. Use cases: lowered-carry / left-handed variants where the model legitimately differs across map states or community packs; and skyboxes (gfx/env/*), where custom sky packs are commonplace and legitimate but a transparent or flattened sky is a real visual advantage worth an admin's eyes.",
+                "review": "Mismatch surfaces in dossier as 'admin review' item, NOT a violation. Player's local file copied into session bundle's review_files/ subdirectory for admin inspection. Use cases: lowered-carry / left-handed variants where the model legitimately differs across map states or community packs; skyboxes (gfx/env/*), where custom sky packs are commonplace and legitimate but a transparent or flattened sky is a real visual advantage worth an admin's eyes; and first-person grenade viewmodels (models/v_{grenade,mills,stick}.mdl), which are allowed at any hash but are still worth an admin's eyes.",
             },
             "scope_notes": [
                 "Standard US-vs-Wehrmacht 6v6 weapon kit. British/commonwealth and paratrooper-class weapons NOT enforced.",
-                "v_*.mdl (first-person view models) NOT enforced, grenade viewmodels (v_grenade/v_mills/v_stick) included — they were in scope 2026-07-07 to 2026-09-13, when the operator ruled them allowable (for now). p_/w_ grenade models stay enforced.",
+                "v_*.mdl (first-person view models) NOT enforced, EXCEPT grenade viewmodels (v_grenade/v_mills/v_stick), which are IN scope at severity 'review' since 2026-09-13. They are allowed at any hash and never count toward a verdict; they are listed so a modified copy is still captured for admin review, which excluding them made impossible. p_/w_ grenade models stay enforced as violations.",
                 "gfx/env/* (skyboxes) IN scope at severity 'review' since 2026-08-27 (was an excluded bucket). Reported and captured for admin review; never counts toward a verdict. Only skyboxes a map .res references enter scope -- stock skies are unreferenced and stay out.",
                 "_l / l-suffix pose variants NOT enforced — pruned 2026-05-13 (non-stock community files; MissingFiles noise on clean installs).",
             ],
             "excluded_buckets": [
                 "models/{w_aflag,w_gflag,w_wflag}.mdl (flag — cosmetic, allowed)",
-                "models/{v_grenade,v_mills,v_stick}.mdl (first-person grenade viewmodels — seen only by the holder, allowed)",
                 "overviews/* (top-down map BMPs — cosmetic, allowed)",
                 # maps/*.bsp: NOT cosmetic, and this is a stated gap rather than a ruling.
                 # A client-side BSP edit that removes cover is a real wallhack — the server
