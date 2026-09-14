@@ -28,6 +28,12 @@ def test_set_but_empty_falls_back_to_the_default(cfg, monkeypatch):
     assert c.settings.public_json != ""
 
 
+def test_default_does_not_point_at_the_retired_docroot(cfg, monkeypatch):
+    monkeypatch.setenv("SUPPORT_PUBLIC_JSON", "")
+    c = cfg()
+    assert "support.ktpdod.com" not in c.settings.public_json
+
+
 def test_a_real_value_wins(cfg):
     c = cfg(SUPPORT_PUBLIC_JSON="/tmp/x.json")
     assert c.settings.public_json == "/tmp/x.json"
