@@ -81,6 +81,39 @@ corrected 2026-09-14 (no restart); this brings the repo default in line.
 - `tests/test_config.py`: added a case asserting the default never names
   `support.ktpdod.com`.
 
+### Fixed: every capture-reading query excludes warmup bleed-through (2026-09-14)
+
+The daemon tags a `ktp_flag_captures` row with the live match/half only if its
+own `round_live` flag is set at the moment the capture *completes*. That flag
+flips the instant `KTP_MATCH_START` fires, but a capture already in progress
+from warmup can still finish a fraction of a second later and land fully
+credited to the new half. A real capture needs several seconds of continuous
+presence, so it can never complete in the same rounded second as the half's
+own `start_time` -- every leaked row measured did.
+
+Found auditing S10 day-1 production data: 2 of 1,049 captures on 2026-09-13,
+76 of ~4,700 since August. Fixed everywhere the table is read for a live
+report, not just the two queries found first:
+
+- `sql/analytics/capture_credit_fact.sql`, `capture_event_fact.sql` (the
+  per-flag and per-event breakdowns)
+- `sql/analytics/cap_participation_fact.sql` (participation share)
+- `sql/analytics/objective_timeline_fact.sql` (private shadow correlations)
+- `sql/analytics/player_match_fact.sql`, `player_half_fact.sql` (the box
+  score's own `capture_credits`/"Caps" column -- the field the report
+  question that started this review was actually about)
+- `sql/analytics/quality_inventory.sql` (so the `capture_grouping` quality
+  check's raw counts match what the report actually shows)
+- `scripts/lane_b_match_report.py`'s capture query for the accumulation
+  scorer, which was clamping a bled-through row's time to 0 rather than
+  excluding it, silently crediting `capture_points`/`conversion_points`
+
+Two ad-hoc exploration scripts (`composite_v2.py`, `positional_baseline.py`,
+both self-declared "not part of the test suite") and a handful of offline
+tooling scripts that read the table from an already-dumped fixture for an
+unrelated purpose (spatial atlas prep, retention, momentum research) were
+left alone -- none of them are on the live report path.
+
 ### `scripts`, `systemd`: the wave ledger reconciles the restart, not the stage call (2026-09-14)
 
 `ktp-wave-ledger.py reconcile` read only the artifacts a wave named, so a restart
