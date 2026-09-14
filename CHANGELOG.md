@@ -4,6 +4,59 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`, `docs`: a failed unit's output survives journald rotation (2026-09-14)
+
+`ktp-identity-reconcile.service` failed on 2026-09-08 carrying a real finding —
+exit 1 is how it reports a registry/anti-cheat identity divergence — and six days
+later `journalctl -u ktp-identity-reconcile` returned `-- No entries --`.
+journald on the data server is capped at `SystemMaxUse=1G`, whose drop-in comment
+budgets "roughly 4 days at the measured ~230MB/day"; measured now, the journal
+spans about two days, so the write rate has roughly doubled and nothing reported
+that the window halved.
+
+For a unit whose stdout **is** its report, that is data loss rather than a lost
+trace. The findings were recovered from `/var/log/syslog.2.gz` — `ForwardToSyslog=yes`
+had left a second copy — but syslog is `rotate 4` with a `maxsize 1G` trigger that
+fires every couple of days on this box, so that copy expires about a week after
+the run. Discord is not an archive either: the embed is unsearchable, the
+per-unit cooldown drops repeats, and a relay outage loses it outright.
+
+Fixed once at the shared layer instead of per-unit, per `OBSERVABILITY_PLAN.md`
+(new checks become producers for an existing alerter, not new alerters):
+
+- `scripts/ktp-systemd-alert.py` appends every capture to
+  `/var/log/ktp-systemd-alert.log` — unit, result, exit code, sub-state,
+  is-active, restart count and the journal tail under a UTC-stamped header.
+  Written **before** the cooldown check and before the POST, so a suppressed
+  alert, a failed relay and a rotated journal each still leave the output on
+  disk. `append_alert_log()` swallows `OSError` and warns: losing the archive
+  must never lose the alert, which is the same fail-open rule the cooldown
+  writer already follows.
+- The journal capture goes from 25 lines to 400, and only the **last 25** reach
+  the embed — Discord's description cap is unchanged and so is the embed. A run
+  that reports many findings is exactly the run whose tail must not be clipped,
+  and that run is no longer the one that gets truncated.
+- `--alert-log` overrides the path, so the capture can be exercised without
+  writing to `/var/log`.
+- `scripts/ktp-systemd-alert.logrotate` → `/etc/logrotate.d/ktp-systemd-alert`.
+  Monthly, `rotate 12`, `maxsize 64M`, `delaycompress`, `create 0640 root root`,
+  copying the `ktp-disk-history.logrotate` stanza. Retention is deliberately long
+  — rotating this on journald's two-day horizon would rebuild the hole it fills.
+  Also adopts `/var/log/ktp-systemd-alert-failed.log`, the POST-failure sentinel,
+  which was unrotated.
+
+Not built: no freshness check on the new artifact. Alerting on work done needs a
+cadence to compare against, and this file is written only when something fails —
+so an mtime gate would read `stale` forever on a healthy estate, which is the
+`BANLIST_STALE_SEC` mistake `ktp-data-server-health.sh` already documents.
+
+Deploy: `install -m 0755 scripts/ktp-systemd-alert.py /usr/local/bin/ktp-systemd-alert`
+and `install -m 0644 scripts/ktp-systemd-alert.logrotate /etc/logrotate.d/ktp-systemd-alert`,
+then `logrotate -d /etc/logrotate.d/ktp-systemd-alert` to confirm it is not
+skipped — `/var/log` is group-writable here, and a stanza logrotate refuses is
+silent (see `scripts/README-hltv-connection-logging.md`). No unit change, no
+`daemon-reload`, no restart.
+
 ### `scripts`, `sql`, `config`: match reports carry kill streaks, per-side weapon and duel splits, and per-class rows (2026-09-14)
 
 Builds items 1-5 of `docs/proposals/streaks-and-side-splits.md`. Report schema

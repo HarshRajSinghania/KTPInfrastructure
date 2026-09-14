@@ -152,16 +152,34 @@ Ranked by what they would cost during Season 10.
 ### Open right now
 
 `ktp-identity-reconcile.service` has been **failed since 2026-09-08 09:01:53
-EDT** — two days, three days before Season 10 opens. Its `OnFailure=` alert
-*did* fire (`ktp-systemd-alert@ktp-identity-reconcile.service.service`,
-`Result=success`, same timestamp), so this is not a detection failure. The alert
-was delivered and the unit is still failed.
+EDT** — six days as of 2026-09-14. Its `OnFailure=` alert *did* fire
+(`ktp-systemd-alert@ktp-identity-reconcile.service.service`, `Result=success`,
+same timestamp), so this is not a detection failure. The alert was delivered and
+the unit is still failed.
 
 That is §2.2 of the infra research handover stated as a live case rather than a
 hypothetical: alerts land in a channel, nothing tracks open-versus-resolved, and
 a fired alert with no acknowledgement is indistinguishable from a handled one.
 The failure reason is not readable without journal access
 (`krodssh` is not in `adm` / `systemd-journal`).
+
+**And by 2026-09-14 it was not readable with journal access either.**
+`journalctl -u ktp-identity-reconcile` returned `-- No entries --`: journald
+here holds about two days against a weekly unit. This unit's stdout *is* its
+report — it prints its `CRITICAL` lines and exits 1 to raise them — so rotation
+destroyed the findings themselves, not a trace of them. **The alert having fired
+is what makes that survivable**, and only by luck: the embed reached Discord,
+and `ForwardToSyslog=yes` left a second copy in `/var/log/syslog.2.gz`, which is
+where the 09-08 findings were recovered from. Neither is an archive — syslog's
+own stanza is `rotate 4` with a `maxsize 1G` trigger firing every couple of days
+here, so that copy expires within about a week of the run.
+
+Fixed at the shared layer rather than in this unit, per the standing rule in
+[`OBSERVABILITY_PLAN.md`](../../OBSERVABILITY_PLAN.md) (§ no new alerting
+implementations): `ktp-systemd-alert` now appends every capture to
+`/var/log/ktp-systemd-alert.log` before it attempts the POST, so a suppressed
+alert, a relay outage and a rotated journal all still leave the output on disk.
+**Read a failed unit's output there first** — the journal is the copy that expires.
 
 ## Unverified
 
