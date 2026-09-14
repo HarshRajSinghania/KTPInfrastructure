@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import ladder as L
+import match_binding as MB
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -77,6 +78,37 @@ def load_bridge() -> dict[str, int] | None:
     return bridge
 
 
+def actual_participants(key: str, fixtures, rosters):
+    """{fixture_id: binding} for fixtures whose game match can be identified.
+
+    The ladder needs who PLAYED, not who is registered. See match_binding for
+    why that distinction is the difference between a player rating and a team
+    rating. Only website player ids are usable here (game_match_player carries
+    those), so this runs on the CI identity path.
+    """
+    completed = [f for f in fixtures if f.get("home_score") is not None]
+    if not completed:
+        return {}
+    earliest = min(f["scheduled_at"] for f in completed if f.get("scheduled_at"))
+    window_start = str(earliest)[:10]
+    games = fetch(key, "game_match", "id,game_match_id,started_at,map_name,player_count",
+                  f"&started_at=gte.{window_start}&order=started_at")
+    if not games:
+        return {}
+    ids = ",".join(str(g["id"]) for g in games)
+    people = fetch(key, "game_match_player",
+                   "game_match_id,player_id,game_team,player_name",
+                   f"&game_match_id=in.({ids})")
+    by_game = defaultdict(list)
+    for row in people:
+        by_game[row["game_match_id"]].append(row)
+    bound, unbound = MB.bind(completed, games, by_game, rosters)
+    for miss in unbound:
+        print(f"  fixture {miss['fixture_id']}: {miss['reason']} "
+              f"-- falling back to the registered roster")
+    return bound
+
+
 def build_league_matches(key: str) -> tuple[list[dict], dict]:
     """Completed league matches with both scores, newest last."""
     bridge = load_bridge()
@@ -108,12 +140,24 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
         if pid is not None:
             rosters[row["season_team_id"]].add(merges.get(pid, pid))
 
-    out, pending = [], 0
+    # Who ACTUALLY played, where we can establish it. Falls back to the
+    # registered roster per fixture, which is recorded so the digest can say
+    # how much of the week was rated on real participation.
+    played = actual_participants(key, matches_raw, rosters) if bridge is None else {}
+
+    out, pending, used_actual, ringer_appearances = [], 0, 0, 0
     for m in matches_raw:
         if m["home_score"] is None or m["away_score"] is None or m["home_score"] == m["away_score"]:
             pending += 1
             continue
-        home, away = rosters.get(m["home_season_team_id"], set()), rosters.get(m["away_season_team_id"], set())
+        binding = played.get(m["id"])
+        if binding:
+            home, away = set(binding["home_players"]), set(binding["away_players"])
+            used_actual += 1
+            ringer_appearances += len(binding.get("ringers", []))
+        else:
+            home = rosters.get(m["home_season_team_id"], set())
+            away = rosters.get(m["away_season_team_id"], set())
         if len(home) < 4 or len(away) < 4:
             continue
         st_home = season_teams.get(m["home_season_team_id"], {})
@@ -128,9 +172,16 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
             y=1.0 if m["home_score"] > m["away_score"] else 0.0,
             margin=abs(m["home_score"] - m["away_score"]),
             home_score=m["home_score"], away_score=m["away_score"],
+            actual_roster=bool(binding),
+            # Recorded but excluded from t1/t2 -- see match_binding._ringers.
+            # Kept on the row, not just the aggregate count, so a specific
+            # match's ringer(s) can be traced back from the digest/summary.
+            ringers=sorted(binding.get("ringers", [])) if binding else [],
         ))
     out.sort(key=lambda m: m["when"])
-    return out, dict(pending=pending, total_scheduled=len(matches_raw))
+    return out, dict(pending=pending, total_scheduled=len(matches_raw),
+                     rated_on_actual_participants=used_actual,
+                     ringer_appearances=ringer_appearances)
 
 
 def season_rosters(key: str, season_number: int):
@@ -273,8 +324,13 @@ def main():
 
     digest = [f"# MMR weekly digest -- {now}\n",
               f"**{len(matches)} completed league matches** rated so far; "
-              f"{counts['pending']} fixtures still scheduled.\n",
-              "## Prediction accuracy to date\n",
+              f"{counts['pending']} fixtures still scheduled.\n"]
+    if counts.get("ringer_appearances"):
+        digest.append(
+            f"{counts['ringer_appearances']} ringer appearance(s) recorded this week -- a "
+            "player who played for a team other than the one they're registered to. Recorded, "
+            "but excluded from every rating those matches would otherwise have moved.\n")
+    digest += ["## Prediction accuracy to date\n",
               f"| Metric | Value |", "|---|---|",
               f"| Matches predicted | {metrics['n']} |",
               f"| Accuracy | {metrics['acc']:.1%} |",
@@ -325,6 +381,7 @@ def main():
     (HERE / "weekly_digest.md").write_text("\n".join(digest) + "\n", encoding="utf-8")
     (HERE / "weekly_summary.json").write_text(json.dumps(dict(
         generated_at=now, completed_matches=len(matches), pending=counts["pending"],
+        ringer_appearances=counts.get("ringer_appearances", 0),
         accuracy=metrics["acc"], log_loss=metrics["log_loss"], brier=metrics["brier"], ece=metrics["ece"],
         upsets=len(upsets), challenger_beat_champion=bool(beat_champion),
         challenger_name=beat_champion[0]["name"] if beat_champion else None,

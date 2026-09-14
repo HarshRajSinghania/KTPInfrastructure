@@ -648,13 +648,19 @@ WHERE s.match_id={match} AND s.half>0
     ]
     team_kills = Counter(_i(row["killer_id"]) for row in teamkill_rows)
 
+    # Unlike the sibling queries below, a capture cannot simply be time-clamped
+    # to 0 -- a completion at or before the half's own start_time is warmup
+    # bleed-through (the daemon's round_live flag flips at KTP_MATCH_START,
+    # but an attempt already in progress can still complete a moment later),
+    # never a real capture racing the clock. Exclude it outright rather than
+    # floor it to a phantom time-zero credit. See sql/analytics/capture_credit_fact.sql.
     capture_rows = _rows(db, "captures", f"""
 SELECT c.id, c.half, c.player_id, c.team AS capture_team, c.flag_name,
        GREATEST(TIMESTAMPDIFF(MICROSECOND, m.start_time, c.event_time)/1000000.0, 0)
            AS game_time
 FROM ktp_flag_captures c
 JOIN ktp_matches m ON m.match_id=c.match_id AND m.half=c.half
-WHERE c.match_id={match} AND c.half>0
+WHERE c.match_id={match} AND c.half>0 AND c.event_time > m.start_time
 ORDER BY c.half, c.event_time, c.id
 """)
     grouped_captures: dict[tuple[int, float, int, str], set[int]] = defaultdict(set)
