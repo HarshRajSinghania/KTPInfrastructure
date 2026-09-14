@@ -35,3 +35,5 @@ scripts/hooks/* text eol=lf
 # auditd rule files are parsed by augenrules on the host; a CRLF line makes it
 # skip the rule and still exit 0, so the audit reads as "nothing ever wrote there".
 *.rules text eol=lf
+# GRUB fixtures are parsed by bash/awk in tests; a CRLF line breaks the menu and grubenv parsing.
+tests/fixtures/grub_default_kernel/** text eol=lf
