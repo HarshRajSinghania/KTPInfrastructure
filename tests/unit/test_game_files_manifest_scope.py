@@ -275,3 +275,64 @@ def test_the_viewmodels_left_the_excluded_set(mod):
     # them again from a route the fixture does not happen to exercise.
     assert not set(mod.GRENADE_VIEWMODELS) & mod.EXCLUDED_EXACT
     assert set(mod.GRENADE_VIEWMODELS) == set(mod.REVIEW_EXACT)
+
+
+# Held models the DoD binaries never load. They sat in WEAPON_FAMILIES until
+# 2026-09-15 in place of the real ones, so the BAR and STG44 held models -- what
+# OPPONENTS see -- went unhashed while two names no client has were reported
+# missing by 690 of 691 scans. They are present on the fleet tree (a community
+# pack ships them), which is why "it exists on a server" is not the test; the
+# test is whether dod.so/client.so reference it.
+DEAD_HELD_MODELS = ("p_bar", "p_mp44")
+
+# Verified 2026-09-15 by `strings` over dod/dlls/dod.so + dod/cl_dlls/client.so:
+# p_barbu 4 refs, p_stg44 2 refs, p_colt 2 refs (control), p_bar 0, p_mp44 0.
+REAL_HELD_MODELS = ("p_barbu", "p_barbd", "p_stg44")
+
+
+def test_weapon_kit_names_no_model_the_game_never_loads(mod):
+    # Normalise the shape before comparing: a bare string iterates CHARACTER by
+    # character, so the naive comprehension matches nothing and the assert passes
+    # vacuously against the very code it is meant to catch. Measured -- this test
+    # passed on the unfixed table until the flattening was made explicit.
+    named = set()
+    for _, p_bases, _ in mod.WEAPON_FAMILIES:
+        named.update([p_bases] if isinstance(p_bases, str) else p_bases)
+    dead = sorted(named & set(DEAD_HELD_MODELS))
+    assert not dead, (
+        f"WEAPON_FAMILIES names held models the DoD binaries never reference: {dead}. "
+        "Confirm a name with `strings` over dod.so/client.so before adding it -- "
+        "presence on a server tree proves nothing, the fleet install carries a community pack."
+    )
+
+
+def test_the_real_bar_and_stg44_held_models_are_in_the_kit(mod):
+    named = {b for _, p_bases, _ in mod.WEAPON_FAMILIES for b in p_bases}
+    absent = sorted(set(REAL_HELD_MODELS) - named)
+    assert not absent, (
+        f"held models the game actually loads are missing from the kit: {absent} -- "
+        "these are the models other players see, so an unhashed one is a real gap"
+    )
+
+
+def test_every_family_carries_its_held_models_as_a_list(mod):
+    # The p_ side became a list so a family can hold several models (bipod up/down).
+    # A bare string would still iterate -- character by character -- and emit nothing,
+    # which is the failure this pins rather than a style preference.
+    bad = [fam for fam, p_bases, _ in mod.WEAPON_FAMILIES if not isinstance(p_bases, (list, tuple))]
+    assert not bad, f"these families carry a bare string instead of a list of held models: {bad}"
+
+
+def test_both_bar_held_models_reach_the_manifest(mod, tmp_path):
+    # bar is the only family with two held models; the emit loop flattens (*p_bases, w_base),
+    # and a regression there would drop the second silently.
+    files = {f"models/{b}.mdl": f"{b}-body" for b in ("p_barbu", "p_barbd", "p_stg44")}
+    files["models/w_bar.mdl"] = "w_bar-body"
+    files["models/w_mp44.mdl"] = "w_mp44-body"
+    ini = tmp_path / "ktp_file.ini"
+    ini.write_text("// header\n")
+    ssh = FakeSSH({}, files)
+    entries = mod.build_manifest(ssh, DOD, str(ini))
+    got = {e["path"] for e in entries}
+    for base in ("p_barbu", "p_barbd", "p_stg44"):
+        assert f"models/{base}.mdl" in got, f"{base} did not reach the manifest"
