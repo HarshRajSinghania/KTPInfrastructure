@@ -4,6 +4,23 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`, `ops`, `docs`: five scripts that ran only on the hosts are committed (2026-09-13)
+
+Captured read-only on 2026-09-13 and committed byte-identical, so each installed copy's md5 equals its blob.
+
+- `scripts/ktp-kernel-update.sh`: `/usr/local/sbin` on all five game hosts, one md5 everywhere. A one-shot
+  `apt-get upgrade` then `systemctl reboot`, last run 2026-08-25 01:00-01:40 ET, with nothing scheduling it now.
+  It sets no GRUB default, so it boots whatever entry 0 is; see `docs/runbooks/GRUB_DEFAULT_KERNEL.md`.
+- `ops/rc-local/<host>/rc.local`: `/etc/rc.local` on all five game hosts. Atlanta, Dallas and New York
+  share one file, Denver's differs only in the NIC name, and Chicago's is the older provisioner layout.
+  None of the three matches today's `provision-gameserver.sh` heredoc.
+- `scripts/ktp-identity-reconcile-fetch.sh`: the data server's `ExecStartPre` for `ktp-identity-reconcile.service`.
+  It reads `GH_TOKEN` from the environment; nothing secret is in the file.
+- `scripts/curl_smoke.py`: the KTPAmxxCurl boot/changelevel/quit smoke in `/opt/ktp-tier2-runner`. Its rcon
+  password is a fixed value for a throwaway `sv_lan` server on 127.0.0.1.
+- `docs/LIVE_SCRIPT_INVENTORY.md`: those rows now read MATCH with full md5s; Atlanta and Dallas `rc.local` added.
+- Deploy: nothing changes on any host. The installed copies still need manifest rows (see the PR).
+
 ### `scripts`: the fleet audit redacts by shape before anything is published (2026-09-14)
 
 `.github/workflows/fleet-audit.yml` posts the drift report to a GitHub issue and

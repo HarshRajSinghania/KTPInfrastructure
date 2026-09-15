@@ -1,0 +1,53 @@
+#!/bin/bash
+# KTP Game Server Performance - applied at boot
+# See: KTPInfrastructure/docs/UBUNTU_OPTIMIZATION_RESEARCH.md
+
+# CPU Performance
+for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    [ -f "$gov" ] && echo performance > "$gov" 2>/dev/null
+done
+for cpu in /sys/devices/system/cpu/cpu*/cpuidle; do
+    for state in $cpu/state*/disable; do
+        [ -f "$state" ] && echo 1 > "$state" 2>/dev/null
+    done
+done
+
+# Memory Performance
+[ -f /sys/kernel/mm/transparent_hugepage/enabled ] && echo never > /sys/kernel/mm/transparent_hugepage/enabled
+[ -f /sys/kernel/mm/transparent_hugepage/defrag ] && echo never > /sys/kernel/mm/transparent_hugepage/defrag
+[ -f /proc/sys/vm/compaction_proactiveness ] && echo 0 > /proc/sys/vm/compaction_proactiveness
+[ -f /sys/kernel/mm/ksm/run ] && echo 0 > /sys/kernel/mm/ksm/run
+[ -f /sys/kernel/mm/lru_gen/min_ttl_ms ] && echo 1000 > /sys/kernel/mm/lru_gen/min_ttl_ms
+
+# Network Performance - disable NIC offloading
+IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5; exit}')
+if [ -n "$IFACE" ]; then
+    ethtool -K "$IFACE" gro off 2>/dev/null
+    ethtool -K "$IFACE" tso off 2>/dev/null
+    ethtool -K "$IFACE" lro off 2>/dev/null
+    ethtool -C "$IFACE" rx-usecs 1 2>/dev/null
+fi
+
+# Conntrack bypass for game server UDP
+iptables -t raw -D PREROUTING -p udp --dport 27015:27019 -j NOTRACK 2>/dev/null
+iptables -t raw -D OUTPUT -p udp --sport 27015:27019 -j NOTRACK 2>/dev/null
+iptables -t raw -A PREROUTING -p udp --dport 27015:27019 -j NOTRACK
+iptables -t raw -A OUTPUT -p udp --sport 27015:27019 -j NOTRACK
+
+
+# ============================================
+# IRQ Affinity - Steer to Housekeeping CPUs
+# ============================================
+
+# Steer all IRQs to housekeeping CPUs 0,1 (bitmask 0x03)
+echo 3 > /proc/irq/default_smp_affinity 2>/dev/null
+for irq_dir in /proc/irq/[0-9]*; do
+    irq=$(basename "$irq_dir")
+    [ "$irq" = "0" ] || [ "$irq" = "2" ] && continue
+    echo 3 > "$irq_dir/smp_affinity" 2>/dev/null || true
+done
+
+# KTP Phase 2b - NIC ring buffers + qdisc (2026-04-13)
+ethtool -G enp2s0f0 rx 4096 tx 4096 2>/dev/null
+tc qdisc replace dev enp2s0f0 root pfifo_fast 2>/dev/null
+exit 0
