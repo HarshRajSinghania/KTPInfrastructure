@@ -409,6 +409,21 @@ def brush_model_indices(bsp: Bsp) -> list[int]:
     return out
 
 
+def water_model_indices(bsp: Bsp) -> set[int]:
+    """A func_water brush is water whatever its texture is named."""
+    out: set[int] = set()
+    for entity in bsp.entities:
+        model = entity.get("model", "")
+        if model.startswith("*") and entity.get("classname", "") == "func_water":
+            try:
+                index = int(model[1:])
+            except ValueError:
+                continue
+            if 0 < index < len(bsp.models):
+                out.add(index)
+    return out
+
+
 def upward_faces(bsp: Bsp):
     """Every face a top-down view could paint: upward, not a tool or masked texture."""
     for model_index in [0] + brush_model_indices(bsp):
@@ -428,13 +443,15 @@ def upward_faces(bsp: Bsp):
 
 def select_faces(bsp: Bsp, projection: Projection, ceiling: float | None) -> list[DrawnFace]:
     drawn: list[DrawnFace] = []
-    for _, _, verts, texture in upward_faces(bsp):
+    water_models = water_model_indices(bsp)
+    for model_index, _, verts, texture in upward_faces(bsp):
         zs = [v[2] for v in verts]
         z_mean = sum(zs) / len(zs)
         if ceiling is not None and z_mean > ceiling:
             continue
         drawn.append(DrawnFace([projection.to_pixel(v[0], v[1]) + (v[2],) for v in verts],
-                               z_mean, max(zs), texture.startswith("!")))
+                               z_mean, max(zs),
+                               texture.startswith("!") or model_index in water_models))
     return drawn
 
 
