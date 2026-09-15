@@ -71,6 +71,25 @@ class PlayerHalves(unittest.TestCase):
         self.assertIsNone(r["damage_per_minute"])
         self.assertEqual(r["kills"], 10)
 
+    def test_score_and_grenade_fields_pass_through_unreconciled(self):
+        rows = [
+            half_row(1, 1, kills=10, deaths=5, score=4, grenade_kills=1,
+                     grenade_damage=50, grenade_damage_taken=20),
+            half_row(1, 2, kills=6, deaths=7, score=3),
+        ]
+        # A half-sum/total mismatch on score must not flip `reconciled` --
+        # ktp_match_stats half=0 is the daemon's own pre-summed total, not
+        # derived from these half rows the way ADDITIVE columns are.
+        totals = [total(1, kills=16, deaths=12, score=999)]
+        out = build_player_halves(rows, totals, per_hit_damage=True, temporal_valid=True)
+        assert out["reconciled"] is True
+        assert out["rows"][0]["score"] == 4
+        assert out["rows"][0]["points_per_minute"] == round(4 * 60.0 / 1200, 3)
+        assert out["rows"][0]["grenade_kills"] == 1
+        assert out["rows"][0]["grenade_damage"] == 50
+        assert out["rows"][0]["grenade_damage_taken"] == 20
+        assert out["rows"][1]["grenade_kills"] == 0
+
     def test_no_source_is_unavailable(self):
         for rows in (None, []):
             out = build_player_halves(rows, TOTALS, per_hit_damage=True, temporal_valid=True)

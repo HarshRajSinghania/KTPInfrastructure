@@ -394,6 +394,20 @@ class AggregatesSynthetic(unittest.TestCase):
         self.assertEqual(aggs["map_profiles"]["source_report_count"], 1)
         self.assertEqual(aggs["map_profiles"]["report_schema_version"], 7)
 
+    def test_map_profiles_kills_and_points_per_minute(self):
+        # No duration_seconds at all (the fixture above): both rates are None,
+        # not a divide-by-zero.
+        m = build_aggregates([self._report("dod_anzio", [])])["map_profiles"]["maps"][0]
+        self.assertIsNone(m["kills_per_minute"])
+        self.assertIsNone(m["points_per_minute"])
+
+        report = self._report("dod_donner", [])
+        report["match"]["duration_seconds"] = 600
+        report["players"] = [{"kills": 10, "score": 8}, {"kills": 5, "score": 4}]
+        m = build_aggregates([report])["map_profiles"]["maps"][0]
+        self.assertEqual(m["kills_per_minute"], 1.5)
+        self.assertEqual(m["points_per_minute"], 1.2)
+
     def test_head_to_head_named_symmetric_thresholded(self):
         cell = {"killer_id": 2, "killer_name": "Bee", "victim_id": 1,
                 "victim_name": "Ay", "kills": 25, "cross_team": True}

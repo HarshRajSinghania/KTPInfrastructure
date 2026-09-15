@@ -535,7 +535,8 @@ def build_season_spatial(reports: list[dict]) -> dict:
 def build_aggregates(reports: list[dict]) -> dict[str, dict]:
     per_map = defaultdict(lambda: {"matches": 0, "kills": 0, "trades": 0,
                                    "multikills": 0, "trade_rates": [],
-                                   "recap_medians": []})
+                                   "recap_medians": [], "duration_seconds": 0,
+                                   "points": 0})
     duels = defaultdict(lambda: {"a_over_b": 0, "b_over_a": 0, "matches": 0})
     names: dict[int, str] = {}
     schema_versions = set()
@@ -547,6 +548,8 @@ def build_aggregates(reports: list[dict]) -> dict[str, dict]:
         pm = per_map[mapname]
         pm["matches"] += 1
         pm["kills"] += sum(p.get("kills") or 0 for p in r.get("players") or [])
+        pm["points"] += sum(p.get("score") or 0 for p in r.get("players") or [])
+        pm["duration_seconds"] += (r.get("match") or {}).get("duration_seconds") or 0
         pm["trades"] += len(st.get("trades") or [])
         pm["multikills"] += len(st.get("fast_multikills") or [])
         for t in st["trade_analysis"].get("teams", []):
@@ -574,6 +577,10 @@ def build_aggregates(reports: list[dict]) -> dict[str, dict]:
          "kills_per_match": round(pm["kills"] / pm["matches"], 1),
          "trades_per_match": round(pm["trades"] / pm["matches"], 1),
          "fast_multikills_per_match": round(pm["multikills"] / pm["matches"], 1),
+         "kills_per_minute": round(pm["kills"] * 60.0 / pm["duration_seconds"], 3)
+         if pm["duration_seconds"] else None,
+         "points_per_minute": round(pm["points"] * 60.0 / pm["duration_seconds"], 3)
+         if pm["duration_seconds"] else None,
          "trade_response_rate_mean": round(statistics.mean(pm["trade_rates"]), 4)
          if pm["trade_rates"] else None,
          "recap_median_seconds": round(statistics.median(pm["recap_medians"]), 1)

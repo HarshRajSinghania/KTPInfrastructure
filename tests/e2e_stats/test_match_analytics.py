@@ -120,7 +120,10 @@ def test_team_summary_adds_only_additive_match_facts():
             "damage_dealt": 600, "damage_taken": 600,
             "team_damage": 0, "self_damage": 0, "capture_credits": 0,
             "cap_breaks": 0, "shots": 60, "hits": 18,
+            "grenade_kills": 0, "grenade_damage": 0, "grenade_damage_taken": 0,
+            "score": 0,
             "damage_differential": 0, "raw_accuracy": 0.3,
+            "kills_per_minute": None, "points_per_minute": None,
         },
         {
             "team": 2, "team_name": "Axis", "players": 6,
@@ -128,9 +131,31 @@ def test_team_summary_adds_only_additive_match_facts():
             "damage_dealt": 600, "damage_taken": 600,
             "team_damage": 0, "self_damage": 0, "capture_credits": 0,
             "cap_breaks": 0, "shots": 60, "hits": 18,
+            "grenade_kills": 0, "grenade_damage": 0, "grenade_damage_taken": 0,
+            "score": 0,
             "damage_differential": 0, "raw_accuracy": 0.3,
+            "kills_per_minute": None, "points_per_minute": None,
         },
     ]
+
+
+def test_team_summary_rolls_up_grenade_and_score_and_computes_rates():
+    players = _players()
+    for i, player in enumerate(players):
+        player["grenade_kills"] = 1
+        player["grenade_damage"] = 50
+        player["grenade_damage_taken"] = 25
+        player["score"] = 2
+    teams = analytics.team_summary(
+        analytics.public_players(players), {"duration_seconds": 600}
+    )
+    allies = next(t for t in teams if t["team"] == 1)
+    assert allies["grenade_kills"] == 6
+    assert allies["grenade_damage"] == 300
+    assert allies["grenade_damage_taken"] == 150
+    assert allies["score"] == 12
+    assert allies["kills_per_minute"] == 0.6
+    assert allies["points_per_minute"] == 1.2
 
 
 def test_markdown_states_positional_privacy_without_player_locations():

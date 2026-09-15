@@ -20,7 +20,9 @@ roster AS (
 ),
 kills AS (
     SELECT killerId AS player_id, half, COUNT(*) AS kills,
-           COALESCE(SUM(headshot), 0) AS headshots
+           COALESCE(SUM(headshot), 0) AS headshots,
+           SUM(CASE WHEN weapon IN ('grenade', 'grenade2', 'mills_bomb')
+                    THEN 1 ELSE 0 END) AS grenade_kills
     FROM hlstats_Events_Frags
     WHERE match_id = {{MATCH_ID}}
     GROUP BY killerId, half
@@ -75,7 +77,17 @@ damage AS (
         COALESCE(SUM(CASE
             WHEN d.attacker_id = r.player_id AND d.victim_id <> r.player_id
                  AND victim.team = r.team THEN d.damage_capped ELSE 0 END), 0)
-            AS team_damage
+            AS team_damage,
+        COALESCE(SUM(CASE
+            WHEN d.attacker_id = r.player_id AND d.victim_id <> r.player_id
+                 AND victim.team <> r.team
+                 AND d.weapon IN ('grenade', 'grenade2', 'mills_bomb')
+                THEN d.damage_capped ELSE 0 END), 0) AS grenade_damage,
+        COALESCE(SUM(CASE
+            WHEN d.victim_id = r.player_id AND d.attacker_id <> r.player_id
+                 AND attacker.team <> r.team
+                 AND d.weapon IN ('grenade', 'grenade2', 'mills_bomb')
+                THEN d.damage_capped ELSE 0 END), 0) AS grenade_damage_taken
     FROM roster r
     JOIN ktp_damage_events d
       ON d.match_id = r.match_id
@@ -83,6 +95,13 @@ damage AS (
     LEFT JOIN roster attacker ON attacker.player_id = d.attacker_id
     LEFT JOIN roster victim ON victim.player_id = d.victim_id
     GROUP BY r.player_id, d.half
+),
+scores AS (
+    -- Per-half objective points, updated directly by the daemon (see
+    -- player_match_fact.sql's half=0 note for the semantics).
+    SELECT player_id, half, score
+    FROM ktp_match_stats
+    WHERE match_id = {{MATCH_ID}} AND half > 0
 ),
 captures AS (
     -- Excludes warmup bleed-through -- see capture_credit_fact.sql.
@@ -114,11 +133,18 @@ SELECT
     COALESCE(dth.deaths, 0) AS deaths,
     COALESCE(a.assists, 0) AS assists,
     COALESCE(k.headshots, 0) AS headshots,
+    COALESCE(k.grenade_kills, 0) AS grenade_kills,
     COALESCE(tk.team_kills, 0) AS team_kills,
     COALESCE(s.suicides, 0) AS suicides,
     COALESCE(dmg.damage_dealt, 0) AS damage_dealt,
     COALESCE(dmg.damage_taken, 0) AS damage_taken,
     COALESCE(dmg.team_damage, 0) AS team_damage,
+    COALESCE(dmg.grenade_damage, 0) AS grenade_damage,
+    COALESCE(dmg.grenade_damage_taken, 0) AS grenade_damage_taken,
+    COALESCE(sc.score, 0) AS score,
+    CASE WHEN h.duration_seconds = 0 THEN NULL
+         ELSE ROUND(COALESCE(sc.score, 0) * 60.0 / h.duration_seconds, 3)
+         END AS points_per_minute,
     COALESCE(c.capture_credits, 0) AS capture_credits,
     COALESCE(b.cap_breaks, 0) AS cap_breaks,
     COALESCE(w.shots, 0) AS shots,
@@ -133,6 +159,7 @@ LEFT JOIN suicides s ON s.player_id = r.player_id AND s.half = h.half
 LEFT JOIN assists a ON a.player_id = r.player_id AND a.half = h.half
 LEFT JOIN breaks b ON b.player_id = r.player_id AND b.half = h.half
 LEFT JOIN damage dmg ON dmg.player_id = r.player_id AND dmg.half = h.half
+LEFT JOIN scores sc ON sc.player_id = r.player_id AND sc.half = h.half
 LEFT JOIN captures c ON c.player_id = r.player_id AND c.half = h.half
 LEFT JOIN weapon_totals w ON w.player_id = r.player_id AND w.half = h.half
 LEFT JOIN presence p ON p.player_id = r.player_id AND p.half = h.half

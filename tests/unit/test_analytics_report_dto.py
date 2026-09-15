@@ -211,6 +211,31 @@ class Sanitize(unittest.TestCase):
         self.assertEqual(p["damage_differential"], 958)
         self.assertEqual(p["kills_per_minute"], 1.656)
 
+    def test_score_and_grenade_fields_whitelisted(self):
+        rep = internal_report()
+        rep["teams"][0].update({
+            "score": 12, "grenade_kills": 4, "grenade_damage": 300,
+            "grenade_damage_taken": 150, "kills_per_minute": 1.8,
+            "points_per_minute": 0.6,
+        })
+        rep["players"][0].update({
+            "score": 8, "grenade_kills": 2, "grenade_damage": 150,
+            "grenade_damage_taken": 50, "points_per_minute": 0.48,
+        })
+        dto = sanitize_report(rep)
+        team = dto["teams"][0]
+        self.assertEqual(team["score"], 12)
+        self.assertEqual(team["grenade_kills"], 4)
+        self.assertEqual(team["grenade_damage"], 300)
+        self.assertEqual(team["grenade_damage_taken"], 150)
+        self.assertEqual(team["points_per_minute"], 0.6)
+        player = dto["players"][0]
+        self.assertEqual(player["score"], 8)
+        self.assertEqual(player["grenade_kills"], 2)
+        self.assertEqual(player["grenade_damage"], 150)
+        self.assertEqual(player["grenade_damage_taken"], 50)
+        self.assertEqual(player["points_per_minute"], 0.48)
+
     def test_ratings_block_provisional_and_named(self):
         r = sanitize_report(internal_report())["ratings"]
         self.assertTrue(r["provisional"])
@@ -433,8 +458,8 @@ class Sanitize(unittest.TestCase):
         ph = sanitize_report(internal_report())["player_halves"]
         self.assertEqual((ph["status"], ph["rows"]), ("unavailable", []))
 
-    def test_contract_is_v1_2_0(self):
-        self.assertEqual(CONTRACT_VERSION, "analytics-report-dto-v1.2.0")
+    def test_contract_is_v1_3_0(self):
+        self.assertEqual(CONTRACT_VERSION, "analytics-report-dto-v1.3.0")
 
     def test_player_halves_carry_side_and_best_streak(self):
         rep = internal_report()
@@ -447,6 +472,20 @@ class Sanitize(unittest.TestCase):
         rows = sanitize_report(rep)["player_halves"]["rows"]
         self.assertEqual([(r["side"], r["best_streak"]) for r in rows],
                          [("Axis", 5), (None, None)])
+
+    def test_player_halves_carry_score_and_grenade_fields(self):
+        rep = internal_report()
+        rep["player_halves"] = {"status": "available", "reconciled": True,
+                                "mismatched_columns": [], "rows": [
+            {"player_id": 7, "player_name_at_match": "A", "team": 1, "half": 1,
+             "score": 4, "points_per_minute": 0.8, "grenade_kills": 1,
+             "grenade_damage": 75, "grenade_damage_taken": 25}]}
+        row = sanitize_report(rep)["player_halves"]["rows"][0]
+        self.assertEqual(row["score"], 4)
+        self.assertEqual(row["points_per_minute"], 0.8)
+        self.assertEqual(row["grenade_kills"], 1)
+        self.assertEqual(row["grenade_damage"], 75)
+        self.assertEqual(row["grenade_damage_taken"], 25)
 
     def test_kill_streaks_whitelisted(self):
         rep = internal_report()

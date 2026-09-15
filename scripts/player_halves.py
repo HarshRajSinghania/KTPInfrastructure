@@ -62,6 +62,12 @@ def build_player_halves(
         kills, deaths = values["kills"] or 0, values["deaths"] or 0
         dealt, taken = values["damage_dealt"], values["damage_taken"]
         per_minute = temporal_valid and duration > 0
+        # score and the grenade columns are not reconciled against the match
+        # total here: ktp_match_stats' half=0 row is the daemon's own
+        # pre-summed total (see player_match_fact.sql), not derived by
+        # summing these half rows the way the ADDITIVE columns are, so a
+        # mismatch would not mean the same thing a kills/damage one does.
+        score = _int(r.get("score"))
         out.append({
             "player_id": pid,
             "player_name_at_match": r.get("player_name_at_match"),
@@ -80,6 +86,12 @@ def build_player_halves(
                                   if per_minute and dealt is not None else None),
             "kills_per_minute": (round(kills * 60.0 / duration, 3)
                                  if per_minute else None),
+            "score": score,
+            "points_per_minute": (round(score * 60.0 / duration, 3)
+                                  if per_minute else None),
+            "grenade_kills": _int(r.get("grenade_kills")),
+            "grenade_damage": _int(r.get("grenade_damage")),
+            "grenade_damage_taken": _int(r.get("grenade_damage_taken")),
         })
     mismatched = sorted({
         c for p in players for c in checked
