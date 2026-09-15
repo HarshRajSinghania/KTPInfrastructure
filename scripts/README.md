@@ -69,8 +69,9 @@ source/sample labels. Official score input is accepted only as the paired
 `objective-score-timeline.json` plus private release produced by the projector;
 the bundle validates the match/map/facts digest binding and strips it before
 publication. A bare sanitized score DTO is deliberately rejected.
-`spatial_map_registry.py` discovers all KTP match configs
-and produces the map readiness matrix; it does not infer geometry or waypoints.
+`spatial_map_registry.py` inventories KTP match maps from the `ktp_maps.ini`
+bindings the server reads and produces the map readiness matrix; it does not
+infer geometry or waypoints, and it does not read a config's `say` line.
 
 `match_fixture_storage.py` measures SQL archive/transfer size and match-tagged
 payload without mislabeling that value as InnoDB allocation or a human-match

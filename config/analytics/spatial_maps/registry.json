@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "minimum_synthetic_matches": 5,
   "minimum_human_matches": 20,
   "defaults": {
@@ -23,19 +23,28 @@
       "synthetic_matches": 5,
       "human_matches": 0,
       "spatial_config": "config/analytics/spatial_maps/dod_anzio.json",
-      "notes": "Only current KTP match map with verified bot waypoints and a reviewed synthetic atlas."
+      "notes": "The one reviewed reference. It leads the queue for that reason, not for play volume -- three maps are played more."
+    },
+    "dod_lennon5_b1": {
+      "priority": 2,
+      "notes": "Most-played map in the pool. It sat here as `dod_lennon_test`, a name no map carries, and the topology claim filed under that name is dropped rather than inherited. Geometry, weights and waypoints unreviewed."
+    },
+    "dod_armory_b6": {
+      "priority": 3,
+      "notes": "Second-most-played map, and missing from this queue entirely until discovery stopped keying on the config say line. Nothing reviewed."
     },
     "dod_harrington": {
-      "priority": 2,
+      "priority": 4,
       "notes": "Flag weights must reflect its non-linear first/second layout; bot waypoints are not verified."
     },
-    "dod_lennon_test": {
-      "priority": 3,
-      "notes": "Anzio-like topology requires its own reviewed geometry and weights; bot waypoints are not verified."
+    "dod_saints2_b3e": {
+      "priority": 5,
+      "notes": "It sat here as `dod_saints`, a stock map that is not in the pool, so the linear-topology claim filed under that name is dropped rather than inherited. It is also the only pool map whose BSP authors home flags, so its review cannot assume a neutral-open board."
     },
-    "dod_saints": {
-      "priority": 4,
-      "notes": "Linear topology requires its own reviewed geometry and weights; bot waypoints are not verified."
+    "dod_thunder2": {
+      "priority": 6,
+      "spatial_config": "config/analytics/spatial_maps/dod_thunder2.json",
+      "notes": "Overview transform is on disk and its provenance is settled -- every field matches the map's own shipped overviews/dod_thunder2.txt, and it is not inherited from dod_donner despite the donner flag names. Flags, topology and waypoints are still unreviewed."
     }
   }
 }
