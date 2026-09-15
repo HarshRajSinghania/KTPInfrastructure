@@ -37,7 +37,7 @@ DRIFT 1, TEMPLATED 2, EXTERNAL 5, MATCH 116.
 | `/usr/local/bin/ktp-fleet-audit.sh` | `d06bfaa2` | DRIFT | `KTPInfrastructure:scripts/ktp-fleet-audit.sh` | equals scripts/ktp-fleet-audit.sh@f219354d once one em-dash double-encoded (cp1252) in transit is undone; comment-only |
 | `/opt/ktp-tier2-runner/curl_smoke.py` | `1e6564a0` | MATCH | `KTPInfrastructure:scripts/curl_smoke.py` @ `8d8fdccf21` | full md5 `1e6564a0b43ce9c79f1d9eb0b5a31a28`; root 644; imports `tests.smoke.rcon` from the runner's `_work` checkout |
 | `/usr/local/bin/ktp-identity-reconcile-fetch.sh` | `ad9a5f53` | MATCH | `KTPInfrastructure:scripts/ktp-identity-reconcile-fetch.sh` @ `8d8fdccf21` | full md5 `ad9a5f53f2d134aad40448ec7735e70c`; root 750; its unit files are versioned in a private repo; reads `GH_TOKEN` from the unit's EnvironmentFile |
-| `/home/hltvserver/hltv-api.py` | `ae54529b` | TEMPLATED | `KTPInfrastructure:scripts/hltv-api.py.example` @ `fd9dd147e9` |  |
+| `/home/hltvserver/hltv-api.py` | `ae54529b` | TEMPLATED | `KTPInfrastructure:scripts/hltv-api.py.example` @ `fd9dd147e9` | full md5 `ae54529b34cf0a978c4cdbf99100c4d7`, 16468 B, mtime 2026-08-08, `hltvserver:hltvserver` 755. Holds a live `AUTH_KEY`, so it can never be tracked verbatim; `scripts/check-hltv-api-drift.py` is how the two get compared. See § hltv-api drift. |
 | `/opt/ktp-backup.sh` | `d99c6e9e` | TEMPLATED | `KTPInfrastructure:scripts/ktp-backup.sh.example` @ `aabb405c6b` |  |
 | `/opt/hlstatsx/scripts/hlstats-awards.pl` | `c2c1f750` | EXTERNAL | — | upstream HLstatsX:CE, not carried in KTPHLStatsX |
 | `/opt/hlstatsx/scripts/hlstats-resolve.pl` | `a2d98cd3` | EXTERNAL | — | upstream HLstatsX:CE, not carried in KTPHLStatsX |
@@ -231,3 +231,31 @@ GENERATED 1, TEMPLATED 1, MATCH 4, THIRD-PARTY 8.
 
 LinuxGSM: 8 files (the per-instance launchers and `lgsm/modules/command_monitor.sh`, one md5 each across instances).
 
+
+## hltv-api drift — the box is BEHIND the example, not ahead
+
+Measured 2026-09-15, read-only, with `scripts/check-hltv-api-drift.py` run on the data server against
+`/home/hltvserver/hltv-api.py` (the file `hltv-api.service` actually execs — `ExecStart=/usr/bin/python3
+/home/hltvserver/hltv-api.py`; there is no copy under `/usr/local/bin` or `/opt`, and a grep there returns
+nothing and reads as "gone").
+
+The example and the installed file diverge in **both** directions, which is why neither is simply stale:
+
+- **The example is ahead on code.** v2.3 (2026-07-07) added `import sys` and a fail-fast that refuses to
+  start on an empty key. The installed file does not have it. That guard has never been deployed.
+- **The installed file is ahead on one comment** — the 2026-08-08 dual-key-close note — and is otherwise
+  the v2.2 body with looser line wrapping. Its startup banner still prints `v2.2`.
+- Everything else in the 243-line diff is comment and formatting churn. `hmac.compare_digest` is present
+  on **both** sides, so the timing-safe compare is deployed.
+
+⚠️ **The missing fail-fast is latent, not live.** The installed file assigns a non-empty `AUTH_KEY`
+inline, so there is no empty key for it to fail open on today. The exposure is that the guard which makes
+that safe by construction is absent — a future rotation that blanks the line, or a move to
+`HLTV_API_KEY` with the env var unset, gets an API that authenticates any request with a missing header
+on a `0.0.0.0` bind. Closing it means installing the v2.3 body and `systemctl restart hltv-api`, which is
+the operator's call: `hltv-restart-all.sh` does **not** restart `hltv-api`.
+
+**Verification controls used, so the "no leak" result means something.** The 32-character `AUTH_KEY`
+value was extracted from the live file and counted: 1 occurrence in the file (the control is alive) and
+**0** in the checker's 11,789 bytes of output. A nonsense token counted 0 in both. `grep -c AUTH_KEY` on
+the live file returned 2.
