@@ -55,6 +55,14 @@ world-to-overview projection pair the match report draws with; it refuses a
 1024x768 8-bit file keyed on palette colour RGB(0,255,0), drawn with that same
 projection (and the ROTATED 1 branch, verified against `dod_thunder`), with
 ZOOM/ORIGIN derived from `models[0]` bounds unless `--descriptor` supplies them.
+`audit_overview_corpus.py` turns that renderer on a whole overview directory and
+asks, per map, whether the shipped image agrees with its own `.txt`: it renders
+each map through the shipped descriptor and searches scale/offset for the
+transform that best lines the two footprints up. Identity means self-consistent;
+anything else measures how far the shipped asset misplaces every player dot. It
+also groups images by md5 and flags a group whose descriptors disagree, and it
+refuses to score an image that keys zero pixels rather than scoring it badly.
+Corpus results are in `docs/OVERVIEW_CORPUS_AUDIT.md`.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
