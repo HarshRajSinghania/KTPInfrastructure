@@ -278,20 +278,38 @@ class Sanitize(unittest.TestCase):
         floored = sanitize_report(rpt)["ratings"]["ktpr_v2"]["players"][0]
         self.assertEqual(floored["rating"], scale["floor"])
 
-    def test_components_are_published_raw_and_say_so(self):
-        """Components are the opposite of rating and must stay that way.
+    def test_components_share_the_rating_scale(self):
+        """One scale, one transform, applied once, here (2026-09-14).
 
-        They ship as raw z-scores so a consumer can rescale them itself; the
-        website maps them through its own curve. If they were ever pre-scaled
-        here, that curve would saturate them exactly as it did the rating.
+        Components used to publish as raw z-scores, leaving the website to
+        map them itself -- which meant the never-negative rule was enforced
+        in two places on two different scales, and the match page showed a
+        ~100-centred rating beside 0-100 components. Both now ship on the
+        same floored index, and the website renders them as published.
         """
         rpt = internal_report()
         rpt["shadow_explorations"]["ktpr_v2"]["players"][0]["components"] = {
             "swing": -1.25, "output": 0.5}
         k = sanitize_report(rpt)["ratings"]["ktpr_v2"]
-        self.assertEqual(k["display_scale"]["components"]["kind"], "raw_z_score")
-        self.assertEqual(k["players"][0]["components"]["swing"], -1.25)
-        self.assertEqual(k["players"][0]["components"]["output"], 0.5)
+        comps = k["players"][0]["components"]
+        scale = k["display_scale"]["components"]
+
+        self.assertEqual(scale["kind"], "floored_index")
+        self.assertEqual(scale["center"], k["display_scale"]["rating"]["center"])
+        self.assertEqual(scale["per_z"], k["display_scale"]["rating"]["per_z"])
+        self.assertEqual(scale["floor"], k["display_scale"]["rating"]["floor"])
+
+        # 100 + 15*0.5 = 107.5; -1.25 would give 81.25, above the floor.
+        self.assertEqual(comps["output"], 107.5)
+        self.assertEqual(comps["swing"], 81.25)
+        # The whole point of the ruling: nothing published goes negative.
+        self.assertTrue(all(v >= scale["floor"] for v in comps.values()))
+
+    def test_a_deeply_negative_component_is_floored_not_negative(self):
+        rpt = internal_report()
+        rpt["shadow_explorations"]["ktpr_v2"]["players"][0]["components"] = {"swing": -9.0}
+        k = sanitize_report(rpt)["ratings"]["ktpr_v2"]
+        self.assertEqual(k["players"][0]["components"]["swing"], 50.0)
 
     def test_accumulation_unavailable_when_not_scored(self):
         acc = sanitize_report(internal_report())["ratings"]["accumulation"]
