@@ -39,12 +39,22 @@ descriptors were cut from: on the fleet's 68 pairs the centre of that box IS
 the shipped ORIGIN for the large majority, and `fit_overview()` reproduces
 the shipped ZOOM to within rounding on the same maps.
 
-Roofs: a top-down render of every upward face shows rooftops and nothing
-else. The default ceiling is derived from the entity lump -- the highest
-floor-anchored point entity (spawns, control points, ammo/health, weapons)
-plus standing headroom -- so roofs above the top playable floor are dropped
-and everything a player can stand on is kept. `--cut` overrides it, `--no-cut`
-draws everything.
+Roofs: the ceiling is the highest surface a player can stand on -- hull 1, the
+BSP's own player hull, decides -- plus standing headroom. Entity origins were
+the anchor first and they found a map's top floor only by luck: `dod_caen2` has
+no floor-anchored entity above z 96, so the cut landed at 256 and sliced the top
+floor off. `--cut` sets a ceiling by hand; `--no-cut` draws everything.
+
+On every map measured this ceiling lands ABOVE the roofs, and that is correct
+rather than a failure of the rule: DoD roofs are places a player stands, and the
+shipped overviews draw them. Rendering each map with its own shipped descriptor
+and comparing transparency masks against its own shipped BMP, a finite cut beat
+no cut on 2 of 23 maps, both of them lennon revisions and both at an arbitrary
+fraction of the world height. The per-map figures and the alternatives that were
+tested and refuted are in the 2026-09-15 CHANGELOG entry.
+
+A `{` texture is alpha-masked in GoldSrc -- foliage, fences, grates -- so it
+cannot fill the footprint it covers, and is never painted.
 
 Usage:
     python scripts/render_overview_bmp.py dod_anzio3_b1 --maps-dir maps/ --out out/
@@ -72,11 +82,14 @@ KEY_INDEX = 0
 MIN_KEY_DISTANCE = 100.0        # every non-key palette entry sits at least this far from the key
 BSP_VERSION = 30
 LUMP_ENTITIES, LUMP_PLANES, LUMP_TEXTURES, LUMP_VERTICES = 0, 1, 2, 3
-LUMP_TEXINFO, LUMP_FACES, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS = 6, 7, 12, 13, 14
+LUMP_TEXINFO, LUMP_FACES, LUMP_CLIPNODES = 6, 7, 9
+LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS = 12, 13, 14
 LUMP_COUNT = 15
+CONTENTS_EMPTY = -1
 
 # Tool textures that never render in game; old compilers leave some in the BSP.
 SKIP_TEXTURES = frozenset({"sky", "null", "aaatrigger", "clip", "hint", "skip", "bevel", "origin"})
+MASKED_PREFIX = "{"             # GoldSrc alpha-masked texture: see-through, so it paints nothing
 # Brush entities whose faces are part of what a player sees from above.
 DRAWN_BRUSH_CLASSES = frozenset({
     "func_wall", "func_wall_toggle", "func_illusionary", "func_breakable", "func_pushable",
@@ -88,6 +101,7 @@ DRAWN_BRUSH_CLASSES = frozenset({
 FLOOR_ANCHOR_CLASSES = ("info_player_", "dod_control_point", "item_", "ammo_", "weapon_",
                         "dod_score_ent", "info_doddetect")
 STANDING_HEADROOM = 160.0       # player is 72 tall; roofs sit well above floor + this
+PLAYER_HEADROOM_PROBE = 40.0    # hull 1 is pre-expanded, so this clears a surface you can stand on
 FALLBACK_CEILING_FRACTION = 0.6  # no anchors: cut this far up the world's z extent
 
 PALETTE_GREY_LO, PALETTE_GREY_HI = 72, 216
@@ -113,6 +127,8 @@ class Bsp:
     surfedges: list[int]
     models: list[tuple[tuple[float, float, float], tuple[float, float, float], int, int]]
     entities: list[dict[str, str]] = field(default_factory=list)
+    clipnodes: list[tuple[int, int, int]] = field(default_factory=list)
+    player_headnode: int = -1                     # worldspawn's hull 1, the standing player
 
 
 def _lump(data: bytes, index: int) -> bytes:
@@ -162,14 +178,21 @@ def parse_bsp(path: Path) -> Bsp:
 
     raw = _lump(data, LUMP_MODELS)
     models = []
+    player_headnode = -1
     for i in range(len(raw) // 64):
         fields = struct.unpack_from("<9f4iiii", raw, i * 64)
         models.append((fields[0:3], fields[3:6], fields[14], fields[15]))
+        if i == 0:
+            player_headnode = fields[10]          # headnode[1]
     if not models:
         raise BspError(f"{path}: no models (lump {LUMP_MODELS} is empty)")
 
+    raw = _lump(data, LUMP_CLIPNODES)
+    clipnodes = [struct.unpack_from("<ihh", raw, i * 8) for i in range(len(raw) // 8)]
+
     entities = parse_entities(_lump(data, LUMP_ENTITIES).split(b"\0")[0].decode("latin-1"))
-    return Bsp(planes, vertices, names, texinfo_miptex, faces, edges, surfedges, models, entities)
+    return Bsp(planes, vertices, names, texinfo_miptex, faces, edges, surfedges, models, entities,
+               clipnodes, player_headnode)
 
 
 def face_vertices(bsp: Bsp, face_index: int) -> list[tuple[float, float, float]]:
@@ -189,6 +212,11 @@ def face_texture(bsp: Bsp, face_index: int) -> str:
         if 0 <= miptex < len(bsp.texture_names):
             return bsp.texture_names[miptex]
     return ""
+
+
+def paints(texture: str) -> bool:
+    """Whether a face with this texture fills its footprint in a top-down view."""
+    return texture not in SKIP_TEXTURES and not texture.startswith(MASKED_PREFIX)
 
 
 def face_up_component(bsp: Bsp, face_index: int) -> float:
@@ -293,8 +321,47 @@ def floor_anchor_heights(bsp: Bsp) -> list[float]:
     return heights
 
 
+def player_hull_is_empty(bsp: Bsp, x: float, y: float, z: float) -> bool:
+    """Whether a standing player fits at this point, per the BSP's own hull 1."""
+    node = bsp.player_headnode
+    while node >= 0:
+        if node >= len(bsp.clipnodes):
+            return False
+        planenum, front, back = bsp.clipnodes[node]
+        if not 0 <= planenum < len(bsp.planes):
+            return False
+        nx, ny, nz, d = bsp.planes[planenum][:4]
+        node = front if nx * x + ny * y + nz * z - d >= 0 else back
+    return node == CONTENTS_EMPTY
+
+
+def highest_standable_surface(bsp: Bsp) -> float | None:
+    """Top of the highest upward face a player can stand on, hull 1 deciding."""
+    if not bsp.clipnodes:
+        return None
+    best = None
+    for _, _, verts, _ in upward_faces(bsp):
+        top = max(v[2] for v in verts)
+        if best is not None and top <= best:
+            continue
+        cx = sum(v[0] for v in verts) / len(verts)
+        cy = sum(v[1] for v in verts) / len(verts)
+        if player_hull_is_empty(bsp, cx, cy, top + PLAYER_HEADROOM_PROBE):
+            best = top
+    return best
+
+
 def default_ceiling(bsp: Bsp) -> tuple[float, str]:
-    """Highest floor-anchored entity plus headroom; falls back to a fraction of the z extent."""
+    """Highest surface a player can stand on, plus headroom.
+
+    Entity origins were the anchor first and they read a map's top floor only by
+    luck: `dod_caen2` has no floor-anchored entity above z 96, so the cut landed
+    at 256 and sliced the top floor off (IoU 0.848 against the shipped image,
+    0.988 uncut). Hull 1 answers "can a player stand here" directly.
+    """
+    top = highest_standable_surface(bsp)
+    if top is not None:
+        return top + STANDING_HEADROOM, f"highest standable surface + {STANDING_HEADROOM:g}"
     heights = floor_anchor_heights(bsp)
     if heights:
         return max(heights) + STANDING_HEADROOM, f"max floor-anchored entity z + {STANDING_HEADROOM:g}"
@@ -342,8 +409,8 @@ def brush_model_indices(bsp: Bsp) -> list[int]:
     return out
 
 
-def select_faces(bsp: Bsp, projection: Projection, ceiling: float | None) -> list[DrawnFace]:
-    drawn: list[DrawnFace] = []
+def upward_faces(bsp: Bsp):
+    """Every face a top-down view could paint: upward, not a tool or masked texture."""
     for model_index in [0] + brush_model_indices(bsp):
         _, _, first_face, face_count = bsp.models[model_index]
         for face_index in range(first_face, first_face + face_count):
@@ -352,17 +419,22 @@ def select_faces(bsp: Bsp, projection: Projection, ceiling: float | None) -> lis
             if face_up_component(bsp, face_index) <= 0.0:
                 continue
             texture = face_texture(bsp, face_index)
-            if texture in SKIP_TEXTURES:
+            if not paints(texture):
                 continue
             verts = face_vertices(bsp, face_index)
-            if len(verts) < 3:
-                continue
-            zs = [v[2] for v in verts]
-            z_mean = sum(zs) / len(zs)
-            if ceiling is not None and z_mean > ceiling:
-                continue
-            drawn.append(DrawnFace([projection.to_pixel(v[0], v[1]) + (v[2],) for v in verts],
-                                   z_mean, max(zs), texture.startswith("!")))
+            if len(verts) >= 3:
+                yield model_index, face_index, verts, texture
+
+
+def select_faces(bsp: Bsp, projection: Projection, ceiling: float | None) -> list[DrawnFace]:
+    drawn: list[DrawnFace] = []
+    for _, _, verts, texture in upward_faces(bsp):
+        zs = [v[2] for v in verts]
+        z_mean = sum(zs) / len(zs)
+        if ceiling is not None and z_mean > ceiling:
+            continue
+        drawn.append(DrawnFace([projection.to_pixel(v[0], v[1]) + (v[2],) for v in verts],
+                               z_mean, max(zs), texture.startswith("!")))
     return drawn
 
 
