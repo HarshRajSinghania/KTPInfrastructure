@@ -13,10 +13,15 @@
 # ============================================================================
 source "${KTP_RELAY_CONF:-/etc/ktp/discord-relay.conf}"
 
-# Discord embed colors (matching KTPMatchHandler)
-COLOR_GREEN=65280       # 0x00FF00 - Success
-COLOR_ORANGE=16750848   # 0xFFA500 - Partial success
-COLOR_RED=16711680      # 0xFF0000 - Failure
+# Severity, glyph, colour and lane. Replaces the raw-hex constants this script
+# carried (65280 / 16750848 / 16711680), which rendered pure green and pure red
+# against every other producer's KTP palette.
+. "$(dirname "${BASH_SOURCE[0]}")/ktp-alert-routing.sh" || {
+    echo "FATAL: ktp-alert-routing.sh not found beside $0 — deploy it first" >&2; exit 3; }
+
+# Last run's severity, so a green that follows a failure still posts its
+# all-clear. Two runs a day; a lost state file costs one silent green.
+STATE_FILE="${HLTV_RESTART_STATE:-/var/lib/ktp-alerts/hltv-restart-all.state}"
 
 # KTP emoji
 KTP_EMOJI="<:KTP:1002382703020212245>"
@@ -120,19 +125,61 @@ FAIL_DETAIL=""
 [ -n "$FAILED_PORTS" ] && FAIL_DETAIL="$FAIL_DETAIL\\n**Failed ports:**$FAILED_PORTS"
 [ -n "$NOT_CONNECTED_PORTS" ] && FAIL_DETAIL="$FAIL_DETAIL\\n**Up but not connected, recording nothing:**$NOT_CONNECTED_PORTS"
 
-if [ $FAILED -eq 0 ]; then
-    TITLE="$KTP_EMOJI HLTV Restart Complete"
+# >>> ktp-hltv-restart-severity
+# hltv_restart_severity <failed> <succeeded> — page / warn / info.
+# A clean restart of scheduled work is a confirmation, not an alert, so it is
+# `info`; `hltv_restart_should_post` is what decides whether an info run is
+# heard at all.
+hltv_restart_severity() {
+    local failed="$1" succeeded="$2"
+    if [ "$failed" -eq 0 ]; then echo info
+    elif [ "$succeeded" -gt 0 ]; then echo warn
+    else echo page
+    fi
+}
+
+# hltv_restart_should_post <severity> <previous_severity>
+# Silence means healthy: an `info` run posts only when the run before it was
+# not, which is the all-clear a page owes. An empty previous (first run, lost
+# state file) stays quiet rather than manufacturing a recovery for a page
+# nobody saw.
+hltv_restart_should_post() {
+    local severity="$1" previous="${2:-}"
+    case "$severity" in
+        page|warn) return 0 ;;
+    esac
+    case "$previous" in
+        page|warn) return 0 ;;
+    esac
+    return 1
+}
+# <<< ktp-hltv-restart-severity
+
+SEVERITY=$(hltv_restart_severity "$FAILED" "$SUCCESS")
+PREV_SEVERITY=$(cat "$STATE_FILE" 2>/dev/null | tr -d '[:space:]')
+
+if [ "$FAILED" -eq 0 ]; then
+    TITLE_TEXT="HLTV Restart Complete"
     DESCRIPTION="All $SUCCESS HLTV instances restarted and connected."
-    COLOR=$COLOR_GREEN
-elif [ $SUCCESS -gt 0 ]; then
-    TITLE="$KTP_EMOJI HLTV Restart - Partial"
+elif [ "$SUCCESS" -gt 0 ]; then
+    TITLE_TEXT="HLTV Restart - Partial"
     DESCRIPTION="$SUCCESS/$TOTAL instances restarted and connected.$FAIL_DETAIL"
-    COLOR=$COLOR_ORANGE
 else
-    TITLE="$KTP_EMOJI HLTV Restart Failed"
+    TITLE_TEXT="HLTV Restart Failed"
     DESCRIPTION="No instance restarted and connected!$FAIL_DETAIL"
-    COLOR=$COLOR_RED
 fi
+
+# A green run that follows a bad one is the recovery, not another routine post.
+POST_SEVERITY="$SEVERITY"
+case "$SEVERITY:$PREV_SEVERITY" in
+    info:page|info:warn) POST_SEVERITY=recovery ;;
+esac
+
+ktp_alert_route "$POST_SEVERITY" || exit 1
+TITLE="$KTP_ALERT_GLYPH $KTP_EMOJI $TITLE_TEXT"
+COLOR="$KTP_ALERT_COLOR"
+
+mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null && printf '%s\n' "$SEVERITY" > "$STATE_FILE"
 
 # Function to send Discord embed
 send_discord_embed() {
@@ -163,9 +210,16 @@ EOF
     echo ""
 }
 
-# Send to both Discord channels
-echo "$LOG_PREFIX Sending Discord notifications..."
-send_discord_embed "$CHANNEL_HLTV_STATUS"
-send_discord_embed "$CHANNEL_HLTV_STATUS_EXTERNAL"
+# The CHANNEL_HLTV_STATUS / _EXTERNAL pair is deliberately left alone: the two
+# ids are a routing decision for the operator, not something to collapse here.
+if hltv_restart_should_post "$SEVERITY" "$PREV_SEVERITY" || [ -n "${KTP_ALERT_ALWAYS_POST:-}" ]; then
+    echo "$LOG_PREFIX Sending Discord notifications (severity=$POST_SEVERITY)..."
+    send_discord_embed "$CHANNEL_HLTV_STATUS"
+    send_discord_embed "$CHANNEL_HLTV_STATUS_EXTERNAL"
+else
+    echo "$LOG_PREFIX Clean restart ($SUCCESS/$TOTAL connected) — digest line, no post."
+    ktp_alert_spool_line hltv-restart-all info \
+        "HLTV: $SUCCESS/$TOTAL proxies restarted and connected" ops-daily || true
+fi
 
 echo "$LOG_PREFIX HLTV scheduled restart complete."

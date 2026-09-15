@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -83,9 +84,13 @@ def box(tmp_path):
         KTP_RELAY_CONF=str(conf), KTP_HLTV_LIVENESS_STATE_DIR=str(d["state"]),
         HLTV_CONFIG_DIR=str(d["configs"]), HLTV_DEMO_DIR=str(d["demos"]),
         SETTLE_SECONDS="0", POLL_SECONDS="0", CONNECT_WAIT_SECONDS="0",
+        HLTV_RESTART_STATE=str(tmp_path / "restart.state"),
+        KTP_ALERT_SPOOL_DIR=str(tmp_path / "spool"),
     )
     d["env"] = env
     d["curl_log"] = tmp_path / "curl.log"
+    d["restart_state"] = tmp_path / "restart.state"
+    d["spool"] = tmp_path / "spool" / "ops-daily.jsonl"
     return d
 
 
@@ -218,15 +223,47 @@ def soak_verify_error_lines(stdout):
             if not re.search(r"succeeded, 0 failed$", ln) and re.search(r"error|failed|fatal", ln, re.I)]
 
 
-def test_all_connected_is_green_and_soak_verify_stays_quiet(box):
+def test_all_connected_posts_nothing_and_soak_verify_stays_quiet(box):
+    """Silence means healthy. A clean restart of scheduled work is a
+    confirmation, not an alert — it used to cost two posts twice a day."""
     restart_journal(box)
     r = run(box, RESTART)
     assert f"{len(PORTS)} succeeded, 0 failed" in r.stdout
     assert "scheduled restart complete" in r.stdout
     assert soak_verify_error_lines(r.stdout) == []
+    assert payloads(box) == []
+    assert box["restart_state"].read_text().strip() == "info"
+
+
+def test_a_clean_restart_leaves_a_digest_line_instead_of_a_post(box):
+    if shutil.which("jq") is None:
+        pytest.skip("the spool line is written with jq")
+    restart_journal(box)
+    run(box, RESTART)
+    (line,) = [json.loads(l) for l in box["spool"].read_text().splitlines() if l.strip()]
+    assert line["producer"] == "hltv-restart-all"
+    assert line["severity"] == "info"
+    assert f"{len(PORTS)}/{len(PORTS)}" in line["text"]
+
+
+def test_the_first_green_after_a_failure_is_the_all_clear(box):
+    """The one green that must be heard. Without it, a page has no end."""
+    box["restart_state"].write_text("page\n", newline="\n")
+    restart_journal(box)
+    run(box, RESTART)
     (embed,) = [p["embeds"][0] for p in payloads(box)]
+    assert embed["title"].startswith("🟢")
     assert embed["title"].endswith("HLTV Restart Complete")
-    assert embed["color"] == 65280
+    assert embed["color"] == 5763719
+
+
+def test_the_second_green_after_a_failure_is_silent_again(box):
+    box["restart_state"].write_text("page\n", newline="\n")
+    restart_journal(box)
+    run(box, RESTART)
+    before = len(payloads(box))
+    run(box, RESTART)
+    assert len(payloads(box)) == before, "the all-clear repeated itself"
 
 
 def test_a_proxy_that_never_connects_is_a_failure_by_port(box):
@@ -236,7 +273,9 @@ def test_a_proxy_that_never_connects_is_a_failure_by_port(box):
     assert "hltv@27020 is active but failed to connect" in r.stdout
     assert soak_verify_error_lines(r.stdout), "soak-verify would not flag the failure"
     (embed,) = [p["embeds"][0] for p in payloads(box)]
+    assert embed["title"].startswith("🟠")
     assert embed["title"].endswith("HLTV Restart - Partial")
+    assert embed["color"] == 16763904
     assert "**Up but not connected, recording nothing:** 27020" in embed["description"]
 
 

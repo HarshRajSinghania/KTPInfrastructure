@@ -122,12 +122,15 @@ oldest_mtime() {
         | awk -F'\t' 'NF && (m=="" || $2<m){m=$2} END{if(m!="")print m}'
 }
 
-# KTP Discord embed constants (match plugins/include/ktp_discord.inc)
+# KTP Discord embed constants. Colours come from ktp-alert-routing.sh so this
+# script cannot drift from the rest of the estate the way it had (16711680 /
+# 16750848 / 65280 are pure hex, not the KTP palette).
 KTP_EMOJI='<:KTP:1002382703020212245>'
-KTP_COLOR_RED=16711680
-KTP_COLOR_ORANGE=16750848
-KTP_COLOR_GREEN=65280
-KTP_COLOR_BLUE=3447003
+. "$(dirname "${BASH_SOURCE[0]}")/ktp-alert-routing.sh" || {
+    echo "FATAL: ktp-alert-routing.sh not found beside $0 — deploy it first" >&2; exit 3; }
+KTP_COLOR_RED=$KTP_RED
+KTP_COLOR_ORANGE=$KTP_YELLOW
+KTP_COLOR_GREEN=$KTP_GREEN
 
 # post_discord <channel_id> <title-without-emoji> <description> <color>
 # Matches the standard KTP embed format used by plugins + hltv-restart-all.sh:

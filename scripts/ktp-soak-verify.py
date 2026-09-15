@@ -92,7 +92,7 @@ DEFAULT_ALERT_CHANNEL = "1498813261263405097"  # scheduled-report
 # KTP embed color palette (matches KTPMatchHandler conventions)
 COLORS = {
     Status.GREEN:  5763719,   # #57F287
-    Status.YELLOW: 15844367,  # #F1C40F
+    Status.YELLOW: 16763904,  # #FFCC00 — the fleet canon (ktp_alert_routing.KTP_YELLOW)
     Status.RED:    15548997,  # #ED4245
 }
 

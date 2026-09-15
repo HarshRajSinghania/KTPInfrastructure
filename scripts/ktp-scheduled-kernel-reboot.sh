@@ -18,6 +18,10 @@ LOG=/var/log/ktp-kernel-reboot.log
 ts(){ TZ=America/New_York date '+%Y-%m-%d %H:%M:%S %Z'; }
 say(){ echo "[$(ts)] $*" >>"$LOG"; }
 . /etc/ktp/discord-relay.conf 2>/dev/null || true
+# Severity/colour canon. Deploy ktp-alert-routing.sh beside this script; a
+# partial deploy must fail loudly here, not post the wrong colour or nothing.
+. "$(dirname "${BASH_SOURCE[0]}")/ktp-alert-routing.sh" || {
+    echo "FATAL: ktp-alert-routing.sh not found beside $0 — deploy it first" >&2; exit 3; }
 CH="${ALERT_CHANNEL:-1497957091107668070}"
 post(){ # $1 title  $2 desc  $3 color
   local p; p=$(jq -n --arg ch "$CH" --arg t "$1" --arg d "$2" --argjson c "$3" \
@@ -38,7 +42,7 @@ if [ "$FRAGS" = "ERR" ] || [ "$LIVE" = "ERR" ]; then
 fi
 if [ "$FORCE" -eq 0 ] && { [ "$FRAGS" -gt 0 ] || [ "$LIVE" -gt 0 ]; }; then
   say "ABORT: activity present (frags=$FRAGS live=$LIVE) -- retrying tomorrow"
-  post "KTP data server reboot deferred" "People are playing (frags/20m: **$FRAGS**, live matches: **$LIVE**). **Not rebooting.** Automatic retry tomorrow 02:00 ET." 16776960; exit 0
+  post "KTP data server reboot deferred" "People are playing (frags/20m: **$FRAGS**, live matches: **$LIVE**). **Not rebooting.** Automatic retry tomorrow 02:00 ET." "$KTP_YELLOW"; exit 0
 fi
 if [ "$FORCE" -eq 1 ]; then
   say "FORCED by operator -- proceeding despite frags=$FRAGS live=$LIVE"
