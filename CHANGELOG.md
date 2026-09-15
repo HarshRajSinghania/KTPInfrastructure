@@ -4,6 +4,38 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: `deploy-restart-script.py` refuses to ship a canonical that drifted from the tracked `.example` (2026-09-14)
+
+The canonical `scripts/ktp-scheduled-restart.sh` is gitignored and untracked, so
+`git status` can never flag drift in it and the deploy shipped whatever was sitting
+in the working tree. Refreshing it by hand fixed that once; nothing prevented a
+recurrence. A pre-flight content guard now runs before the SSH password is even
+read, and refuses unless the canonical matches the tracked `.example` outside an
+allowlist of `@hostinfo` assignment keys.
+
+- Allowlist is `CHANNEL_KTP` and `CHANNEL_EXTERNAL`, matched by KEY, not by value
+  or line number — which is what `docs/runbooks/SCHEDULED_RESTART_LINEAGES.md`
+  already calls L2's entire licence to differ from L3.
+- Pass condition: after folding line endings and trailing whitespace and masking
+  both allowlisted values in *both* files, the two are line-for-line identical.
+  Insertions and deletions therefore fail, in either direction.
+- ⛔ Findings carry keys and line numbers only. A canonical line is never printed:
+  the allowlisted values are live Discord channel IDs and this repo is public.
+  `.example` lines are quoted, being tracked here already.
+- Also refuses a canonical whose placeholders are still unfilled — that ships a
+  script whose 03:00 Discord notification dies while the restart prints green.
+- The `.example` is read from the git blob rather than the working tree. A
+  checkout behind `origin/main` carries a stale one, and comparing against it
+  fails on hundreds of lines that are not drift.
+- Override is `--override-example-guard "<reason>"`, deliberately named rather
+  than folded into `--force`; the reason prints above the deploy and an empty
+  one is rejected.
+- ⚠️ **It fails on today's real pair, and the drift is reported, not fixed:**
+  `.example` carries a three-line comment about the socket-map sweep that the
+  canonical lacks, and the canonical's md5 equals the fleet's, so all 24 hosts
+  lack it too. `tests/unit/test_deploy_restart_example_guard.py` asserts that
+  drift, so reconciling it fails the test loudly instead of passing in silence.
+
 ### `tier2`: pin the reviewed KTPMatchHandler build to 0.10.173 (2026-09-14)
 
 The Tier-2 integration workflow pinned `b891b0e` (0.10.170). The fleet ran that
