@@ -68,6 +68,31 @@ two placeholder values.
 treating L2 as a lineage. L2 becomes what its ignore tag says it is: a local
 working copy, regenerated from L3 by filling two placeholders.
 
+✅ **`deploy-restart-script.py` now enforces that, before it opens a socket.** It
+diffs the canonical it is about to ship against the tracked `.example` and
+refuses unless the only differences are the values of `CHANNEL_KTP` and
+`CHANNEL_EXTERNAL` — allowlisted by KEY, so a wrong value is tolerated but a
+wrong *line* is not. It also refuses a canonical whose placeholders are still
+unfilled, which is the "L3 → fleet blanks both channel IDs" failure above.
+L2 being gitignored is what made this necessary: `git status` cannot flag drift
+in an untracked file, so nothing else was watching it.
+
+- Findings name keys and line numbers. **A canonical line is never printed** —
+  the allowlisted values are live Discord channel IDs and this repo is public.
+- The `.example` is read from the git blob, not the working tree: a checkout
+  behind `origin/main` carries a stale one and the compare then fails on lines
+  that are not drift.
+- Deliberate mismatch ships with `--override-example-guard "<reason>"`. Named,
+  not a bare `--force`, and the reason is printed above the deploy.
+- The allowlist re-derives itself each run from the placeholders `.example`
+  carries, so a third one cannot appear without the guard saying so.
+
+⚠️ **It currently FAILS on the real pair, and that is a live finding, not a bug:**
+`.example` carries a three-line comment on the socket-map sweep that L2 lacks —
+and L2's md5 equals the fleet's, so the hosts lack it too. Reconciling it is an
+operator call; `tests/unit/test_deploy_restart_example_guard.py` asserts the
+drift so that closing it fails loudly rather than passing silently.
+
 ⚠️ **"L3 loses nothing relative to L1" IS NOT A STANDING PROPERTY — it is a
 measurement, and it expired once.** It was true when checked on 2026-08-27 and
 false by 2026-09-10: the fleet had gained the `/etc/ktp/discord-relay.conf`
