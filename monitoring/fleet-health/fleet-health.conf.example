@@ -28,3 +28,14 @@ THRESHOLD_MINUTES=3
 # script derive it from $(hostname -s) — works for the known KTP fleet
 # (neinatl* -> ATL, etc.). Set it explicitly for LAN venues.
 LOCATION=""
+
+# Where ktp-scheduled-restart.sh keeps monitor-cron.bak while it has the monitor
+# cron stripped. Blank tracks that script's own default, ${KTP_STATE_DIR:-$HOME/.ktp};
+# if you point one of the two elsewhere, point both. A path that does not match
+# turns every nightly restart back into a Discord alert.
+RESTART_STATE_DIR=""
+
+# How long a stripped monitor cron is read as a restart in flight rather than a
+# fault. Anything longer than the slowest restart on the host works; the cost of
+# raising it is only how late a genuinely unrestored cron is reported.
+RESTART_GRACE_MINUTES=10
