@@ -1,11 +1,12 @@
 """World-to-overview projection: the origin lands on the image centre, the
-inverse round-trips, ROTATED 1 and malformed overviews fail closed, and the
-derived matrices reproduce the ones the website already ships -- which is the
-regression that proves replacing the hand-maintained table is a no-op."""
+inverse round-trips, malformed overviews fail closed, and the derived matrices
+reproduce the ones the website already ships -- which is the regression that
+proves replacing the hand-maintained table is a no-op."""
 import json
 import unittest
 from pathlib import Path
 
+from scripts.make_overview_descriptor import project as descriptor_project
 from scripts.spatial_map_geometry import (
     SCHEME, UnsupportedOverview, geometry_version, overview_matrices, project)
 
@@ -136,19 +137,52 @@ class Version(unittest.TestCase):
         self.assertEqual(geometry["geometry_version"], geometry_version(self.facts()))
 
 
-class FailClosed(unittest.TestCase):
-    def test_rotated_overviews_are_refused(self):
-        # dod_saints2_b3e ships ROTATED 1. Guessing its axis swap would draw a
-        # confident picture of the wrong place.
+class Rotated(unittest.TestCase):
+    """ROTATED 1 was refused here as unmeasured until 2026-09-15. It is now read
+    off CHudSpectator::DrawOverviewLayer and pinned against the descriptor tool."""
+
+    def test_a_rotated_overview_projects_along_world_x(self):
         overview = dict(OVERVIEWS["dod_anzio"], rotated=True)
-        with self.assertRaises(UnsupportedOverview) as caught:
-            overview_matrices("dod_saints2_b3e", overview)
-        self.assertIn("ROTATED 1", str(caught.exception))
+        geometry = overview_matrices("dod_saints2_b3e", overview)
+        self.assertTrue(geometry["source"]["rotated"])
+        for world_x, world_y in ((0.0, 0.0), (1234.5, -987.25), (-3000.0, 2500.0)):
+            derived = project(geometry["world_to_pixel"], world_x, world_y)
+            expected = descriptor_project(world_x, world_y, overview["zoom"],
+                                          overview["origin_x"], overview["origin_y"], 1,
+                                          overview["width"], overview["height"])
+            self.assertAlmostEqual(derived[0], expected[0], places=9)
+            self.assertAlmostEqual(derived[1], expected[1], places=9)
 
-    def test_a_truthy_rotated_value_is_still_rotated(self):
-        with self.assertRaises(UnsupportedOverview):
-            overview_matrices("dod_x", dict(OVERVIEWS["dod_anzio"], rotated=1))
+    def test_the_two_conventions_are_not_the_same_projection(self):
+        # Guards the refusal from having been lifted into a no-op: if these agreed,
+        # the flag would be decorative and the finding vacuous.
+        flat = overview_matrices("dod_x", dict(OVERVIEWS["dod_anzio"], rotated=False))
+        turned = overview_matrices("dod_x", dict(OVERVIEWS["dod_anzio"], rotated=True))
+        self.assertNotEqual(flat["world_to_pixel"], turned["world_to_pixel"])
+        self.assertNotEqual(flat["geometry_version"], turned["geometry_version"])
 
+    def test_a_rotated_projection_round_trips(self):
+        geometry = overview_matrices("dod_x", dict(OVERVIEWS["dod_anzio"], rotated=True))
+        for world_x, world_y in ((0.0, 0.0), (-1495.0, -326.0), (2048.5, -3071.25)):
+            px, py = project(geometry["world_to_pixel"], world_x, world_y)
+            back_x, back_y = project(geometry["pixel_to_world"], px, py)
+            self.assertAlmostEqual(back_x, world_x, places=6)
+            self.assertAlmostEqual(back_y, world_y, places=6)
+
+    def test_a_rotated_map_origin_still_lands_on_the_image_centre(self):
+        overview = dict(OVERVIEWS["dod_anzio"], rotated=True)
+        geometry = overview_matrices("dod_x", overview)
+        px, py = project(geometry["world_to_pixel"], overview["origin_x"], overview["origin_y"])
+        self.assertAlmostEqual(px, overview["width"] / 2.0, places=9)
+        self.assertAlmostEqual(py, overview["height"] / 2.0, places=9)
+
+    def test_any_truthy_rotated_value_is_read_as_rotated(self):
+        for value in (1, True, "1"):
+            geometry = overview_matrices("dod_x", dict(OVERVIEWS["dod_anzio"], rotated=value))
+            self.assertTrue(geometry["source"]["rotated"], value)
+
+
+class FailClosed(unittest.TestCase):
     def test_missing_fields_are_named(self):
         for field in ("zoom", "origin_x", "origin_y", "width", "height"):
             overview = dict(OVERVIEWS["dod_anzio"])
