@@ -41,6 +41,9 @@ try:
 except ImportError:
     sys.exit("ERROR: paramiko not installed (pip3 install paramiko)")
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from audit_redact import redact_diagnostic  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLE = REPO / "scripts" / "ktp-scheduled-restart.sh.example"
 POST_SWAP = REPO / "scripts" / "ktp-verify-post-swap.sh"
@@ -237,7 +240,11 @@ def main():
         try:
             client = connect(entry)
         except Exception as ex:
-            unreachable.append((name, type(ex).__name__, str(ex)[:120]))
+            # Redacted: fleet-audit.yml uploads this output as an artifact on a
+            # public repo, and a connection error carries the address it failed
+            # to reach.
+            unreachable.append((name, type(ex).__name__,
+                                redact_diagnostic(str(ex))[:120]))
             continue
         reached.append(name)
         try:
