@@ -56,6 +56,33 @@ LAN deployments where Discord may not be reachable or wanted.
 embed body. Defaults assume the standard KTP 5-instance host (`27015–27019`);
 LAN events on a different port range only need to set those two keys.
 
+## The monitor-cron gate
+
+A second, independent check asks whether LinuxGSM's per-instance monitor cron is
+still armed — the thing that would bring a crashed instance back. Counting those
+lines on its own is useless, because `ktp-scheduled-restart.sh` strips exactly
+those lines for the length of the nightly restart and puts them back at the end.
+A per-minute sampler therefore posts a warn and a clear on every host every
+night, and the one case that matters — a restart that died mid-flight and left
+the cron off until someone notices — arrives as an identical warn.
+
+So the gate reads the restart's own sentinel instead. `ktp-scheduled-restart.sh`
+writes `$RESTART_STATE_DIR/monitor-cron.bak` before it strips and removes it
+from its `EXIT` trap, so the file exists for precisely the stripped window:
+
+| monitor cron | sentinel | verdict |
+|---|---|---|
+| complete | — | quiet, or a `re-armed` clear if the previous run warned |
+| short | fresh (< `RESTART_GRACE_MINUTES`) | suppressed — restart in flight |
+| short | stale or absent | **warn** — nothing is going to re-arm it |
+
+⚠️ An unreadable sentinel is treated as ancient, so the gate alerts rather than
+suppresses. A guard that cannot read its own evidence must fire.
+
+⚠️ `RESTART_STATE_DIR` must match `ktp-scheduled-restart.sh`'s `CRON_STATE_DIR`.
+Both default to `${KTP_STATE_DIR:-$HOME/.ktp}`; overriding one and not the other
+restores the nightly alert with nothing to say why.
+
 ## State
 
 `~dodserver/.ktp-fleet-health/state` is a tiny shell-source file containing:
@@ -64,5 +91,7 @@ LAN events on a different port range only need to set those two keys.
 - `ALERT_STATE` — `healthy` | `unhealthy`
 - `LAST_RUN` — epoch seconds
 - `LAST_RUNNING` — last observed `pgrep -c hlds_linux`
+- `CRON_STATE` — `armed` | `incomplete`, the monitor-cron gate's latch
+- `LAST_MONITOR_CRONS` — last counted monitor cron lines
 
 Delete the state file to reset (the next run will recreate it).
