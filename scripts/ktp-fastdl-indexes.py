@@ -469,6 +469,33 @@ for label, dirs in DOD_GROUPS:
              + str(len(os.listdir(FASTDL + "/dod/" + d))) + ' entries</div>',
              d + "/", label) for d in have) + '</div>')
 loose = sorted(f for f in os.listdir(FASTDL + "/dod") if os.path.isfile(FASTDL + "/dod/" + f))
+
+
+def file_rows(directory, names):
+    return "".join(
+        card('<span class="h">' + html.escape(f) + '</span><span class="sz">'
+             + human(os.path.getsize(os.path.join(directory, f))) + '</span>', f, cls="f")
+        for f in names)
+
+
+# The loose files were counted here and never listed, so a human looking for a
+# texture wad found one nowhere on the site. They are not decoration: the engine
+# asks for a map's wads at /dod/<name>.wad, one level ABOVE maps/, which is the
+# last place anyone browsing for them thinks to look.
+wads = [f for f in loose if f.lower().endswith(".wad")]
+other_loose = [f for f in loose if f not in set(wads)]
+loose_cards = ""
+if wads:
+    loose_cards += ('<h2 id="wads">' + str(len(wads)) + ' texture WADs</h2>'
+                    '<p class="note">A map\'s textures live in these, not in <code>maps/</code> '
+                    '&mdash; the engine asks for <code>/dod/&lt;name&gt;.wad</code>. Only custom '
+                    'maps need one; <code>halflife.wad</code> ships with the game and is not here '
+                    'on purpose.</p>'
+                    '<div class="files">' + file_rows(FASTDL + "/dod", wads) + '</div>')
+if other_loose:
+    loose_cards += ('<h2>' + str(len(other_loose)) + ' other loose files</h2>'
+                    '<div class="files">' + file_rows(FASTDL + "/dod", other_loose) + '</div>')
+
 body = ('<div class="crumb"><a href="/">fastdl</a> / dod</div>'
         '<h1>Client <span class="accent">download</span> files</h1>'
         '<p class="lede">These are the files your client pulls automatically when it joins a KTP '
@@ -479,7 +506,8 @@ body = ('<div class="crumb"><a href="/">fastdl</a> / dod</div>'
         + SEARCH + "".join(cards)
         + '<h2>Other directories</h2><div class="row2">' + "".join(
             card('<div class="t">' + d + '/</div>', d + "/")
-            for d in sorted(present - {x for _, ds in DOD_GROUPS for x in ds})) + '</div>')
+            for d in sorted(present - {x for _, ds in DOD_GROUPS for x in ds})) + '</div>'
+        + loose_cards)
 out.append((FASTDL + "/dod/index.html",
             page("KTP FastDL — client downloads", "Client Downloads", body,
                  "Fast content distribution for KTP game servers. Your client fetches from here on "
@@ -736,15 +764,20 @@ for root, dirs, files in os.walk(FASTDL + "/dod"):
                  + str(len(os.listdir(os.path.join(root, x)))) + ' entries</div>',
                  x + "/") for x in subs) + '</div>'
     if fl:
-        rows = "".join(
-            card('<span class="h">' + html.escape(f) + '</span><span class="sz">'
-                 + human(os.path.getsize(os.path.join(root, f))) + '</span>',
-                 f, cls="f") for f in fl)
-        cards += ('<h2>' + str(len(fl)) + ' files</h2><div class="files">' + rows + '</div>')
+        cards += ('<h2>' + str(len(fl)) + ' files</h2><div class="files">'
+                  + file_rows(root, fl) + '</div>')
+    # Browsing maps/ for a texture wad finds none, and the page gave no hint why:
+    # they are one level up, because the engine asks for /dod/<name>.wad.
+    hint = ''
+    if rel == "maps" and wads:
+        hint = ('<p class="note">Looking for a map\'s <b>texture WADs</b>? They are not in here '
+                '&mdash; the engine asks for <code>/dod/&lt;name&gt;.wad</code>, so all '
+                + str(len(wads)) + ' of them are <a href="/dod/#wads">one level up, in '
+                '<code>dod/</code></a>.</p>')
     body = ('<div class="crumb">' + " / ".join(crumbs) + '</div>'
             '<h1><span class="accent">' + html.escape(rel) + '</span></h1>'
             '<p class="lede">Client content. Your game fetches these automatically on connect.</p>'
-            + SEARCH + cards)
+            + hint + SEARCH + cards)
     out.append((os.path.join(root, "index.html"),
                 page("KTP FastDL — dod/" + rel, "Client Downloads", body,
                      "Fast content distribution for KTP game servers.")))
