@@ -49,8 +49,12 @@ shared service. `build_anzio_spatial_atlas.ps1` turns one or more Anzio fixtures
 into the supported heatmap/report image set. Map geometry and analytical
 windows live in `config/analytics/spatial_maps/dod_anzio.json`.
 `spatial_map_geometry.py` turns a map's `overview` block into the
-world-to-overview projection pair the match report draws with; it refuses a
-`ROTATED 1` overview rather than guess the axis swap.
+world-to-overview projection pair the match report draws with, for both
+`ROTATED` conventions. `make_overview_descriptor.py` runs that projection
+backwards: give it a `.bsp` and it solves the `overviews/<map>.txt` descriptor
+-- `ZOOM`, `ORIGIN`, `ROTATED` and layer `HEIGHT` -- from the map's own bounds,
+which `bsp_bounds.py` reads out of lumps 0, 10 and 14. Pass `--json` for the
+bounds box, so whatever renders the matching `.bmp` frames the same one.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
