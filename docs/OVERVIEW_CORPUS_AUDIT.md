@@ -206,8 +206,10 @@ Measured on `dod-27015` with a case-insensitive match and a positive control.
 - **Eleven maps have no overview at all**: `dod_anjou_a3`, `dod_lennon5_test`,
   `dod_pandemic_aim`, `dod_rails_ktp1`, `dod_railyard_test`, `dod_saints2_b1`,
   `dod_saints2_b3a`, `dod_saints_b1`, `dod_saints_b5`, `dod_saints_b8`, `dod_saints_test`.
-  ➡️ **`dod_rails_ktp1` and `dod_anjou_a3` both have an overview in the workstation corpus**
-  that could be copied across; `dod_anjou_a3`'s scores 0.971 against its own descriptor.
+  ➡️ **Three of those have a usable overview in the workstation corpus** that could be copied
+  across, and it was scored here against the map's own descriptor: `dod_anjou_a3` 0.971,
+  `dod_railyard_test` 0.902, `dod_rails_ktp1` 0.781. The first two are as good as the best
+  assets in either corpus. Copying is an operator call, not something this audit does.
 
 On the workstation, six images have no descriptor and three descriptors have no image.
 
