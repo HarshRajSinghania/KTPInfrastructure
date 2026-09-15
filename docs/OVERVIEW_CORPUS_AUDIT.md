@@ -47,7 +47,14 @@ same set and not always the same bytes.
 | Images | 127 | 69 |
 | Descriptors | 124 | 72 |
 | Maps | 125 | 78 |
-| Complete triples | 76 | 30 |
+| Complete triples | 76 | 65 |
+| **Triples scored here** | **76** | **30** |
+
+⚠️ **The fleet pass is a 30-map subset of its 65 triples, not a sweep.** It was chosen as the
+maps the fleet carries and the workstation does not, plus the maps a workstation finding
+needed checking against. The remaining 35 fleet triples are unmeasured — treat the fleet
+bucket counts below as counts within that subset, not as a fleet-wide census. Re-run with
+`--overviews` and `--maps` pointed at an instance's `serverfiles/dod` to close the gap.
 
 Six names carry different bytes in the two places, and the workstation's copy is not
 reliably the newer one. This matters more than it sounds:
@@ -67,7 +74,7 @@ Ranked by the IoU a transform buys, worst first. `scale` and `dx`/`dy` are what 
 must be put through to land on the shipped image, so they measure how far that image
 misplaces the world.
 
-### Dallas fleet (30 triples)
+### Dallas fleet (30 of 65 triples scored)
 
 | Map | baseline | best | gain | transform |
 |---|---|---|---|---|
@@ -125,7 +132,9 @@ dot.
 - **Workstation, `b68796d7702d…`** — `dod_thunder2_b1c` declares ORIGIN (128, −144);
   `dod_thunder2_b1` declares (496, −1288), a 1144-unit difference on one image.
 
-Twelve further duplicate groups agree on their descriptors and are fine.
+The workstation has fifteen duplicate groups of which three disagree; the fleet subset has
+six of which one does. The rest agree on their descriptors and are fine — a single image
+serving several revisions is the normal case, not a defect.
 
 ## Images that key zero pixels — excluded, not failed
 
@@ -143,9 +152,9 @@ nothing about that map.
 
 ## Where the renderer is the problem
 
-Seven fleet maps reach their best at the identity transform and still disagree. Four of the
-seven share their image with another revision, so they are confounded and not evidence. The
-three that own their image, and what was measured on each:
+Seven of the thirty scored fleet maps reach their best at the identity transform and
+still disagree. Four of the seven share their image with another revision, so they are
+confounded and not evidence. The three that own their image, and what was measured on each:
 
 | Map | IoU (default ceiling) | IoU (`--no-cut`) | Reading |
 |---|---|---|---|
