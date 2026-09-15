@@ -55,6 +55,10 @@ backwards: give it a `.bsp` and it solves the `overviews/<map>.txt` descriptor
 -- `ZOOM`, `ORIGIN`, `ROTATED` and layer `HEIGHT` -- from the map's own bounds,
 which `bsp_bounds.py` reads out of lumps 0, 10 and 14. Pass `--json` for the
 bounds box, so whatever renders the matching `.bmp` frames the same one.
+`render_overview_bmp.py` makes that `.bmp` from the same BSP: a 1024x768 8-bit
+file keyed on palette colour RGB(0,255,0), drawn with the same projection (the
+`ROTATED 1` branch verified against `dod_thunder`), with ZOOM/ORIGIN derived
+from `models[0]` bounds unless `--descriptor` supplies them.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
