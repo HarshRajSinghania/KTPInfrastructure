@@ -459,6 +459,36 @@ python3 precache_audit.py --scope all --cron-mode --output /var/log/ktp-precache
 
 **Phase 3 deferred** — SHA256 drift detection (presence-only today). Add only if a real drift incident shows up; deploys are pretty atomic via FTP fan-out.
 
+### build_map_bundle.py / build_resgen.sh
+One entry point from "a new `.bsp` landed" to the four files a client needs:
+`maps/<map>.bsp`, `maps/<map>.res`, `overviews/<map>.txt`, `overviews/<map>.bmp`,
+plus a `MANIFEST.json` of md5s for the post-deploy sweep. It writes to a staging
+directory and touches no server — `docs/MAP_DEPLOY.md` is the operator half.
+
+```bash
+scripts/build_resgen.sh                      # clone + build RESGen at the pinned 2.0.3 tag
+export KTP_RESGEN=~/.cache/ktp/resgen/bin/resgen
+
+python scripts/build_map_bundle.py dod_newmap_b1.bsp \
+    --out ~/staging/maps \
+    --compare-against <dir with the predecessor's .res> --predecessor dod_newmap_a9
+```
+
+RESGen is GPL-2.0 third-party code (`kriswema/resgen`) and is deliberately not
+vendored; `build_resgen.sh` fetches and builds it into a scratch directory.
+
+Two things worth knowing before running it. RESGen lists the overview pair **only
+if both files already exist** next to the map, so the overview has to be rendered
+first — the tool enforces that order and fails the bundle otherwise. And it writes
+CRLF, matching every `.res` already on the fleet.
+
+`--compare-against` prints the entry-list delta against the predecessor map
+alongside the BSP's worldspawn `wad` and `skyname` keys, so a WAD that appeared or
+vanished can be checked against the map rather than accepted.
+
+The validation behind the pinned tag — 44 fleet maps replayed, what reproduced and
+what did not — is in `docs/MAP_DEPLOY.md`.
+
 ### assemble_changelog.py
 Folds the per-change fragments in `changelog.d/` into a numbered `CHANGELOG.md` section. Runs on `main` at release time, and is the only thing that writes that file — a PR adds its own fragment instead, so two PRs never touch the same line. `changelog.d/README.md` is the contributor-facing convention.
 
