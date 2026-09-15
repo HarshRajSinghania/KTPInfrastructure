@@ -1,0 +1,12 @@
+global 
+{
+	ZOOM		1.04
+	ORIGIN	-615.69	-83.69	94
+	ROTATED	0
+}
+
+layer 
+{
+	IMAGE	"overviews/dod_schwetz.bmp"
+	HEIGHT	-1028
+}

@@ -1,0 +1,14 @@
+// overview description file for dod_anzio2_test3
+
+global 
+{
+	ZOOM	0.77
+	ORIGIN	393.61	-86.39	-688.00
+	ROTATED	0
+}
+
+layer 
+{
+	IMAGE	"overviews/dod_anzio2_test3.bmp"
+	HEIGHT	-688.00
+}
