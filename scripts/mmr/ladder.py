@@ -72,6 +72,37 @@ def metrics(preds, ys, bins=5):
     return dict(n=n, log_loss=round(ll, 4), brier=round(brier, 4), acc=round(acc, 3), ece=round(ece, 4), reliability=diag)
 
 
+# ------------------------------------------------- confidence damping
+# Default evidence constant. At k matches of evidence the prediction keeps
+# half its distance from 0.5; the curve is the same n/(n+k) shrinkage
+# ktpr_season.py already uses for its season ratings, kept deliberately
+# consistent rather than inventing a second idiom for the same job.
+EVIDENCE_K = 6.0
+
+
+def damped_probability(p, evidence, k=EVIDENCE_K):
+    """Pull a win probability toward 0.5 by how little evidence backs it.
+
+    Measured need, not theory: through the first nine S10 league matches the
+    ladder issued 92%, 93% and 98% calls off one or two matches of evidence
+    and lost several, scoring 0.985 log-loss against a 0.693 coin flip with
+    a 0.40 calibration error. The ORDERING was fine -- accuracy was 56%, and
+    the ranking is what seeding consumes. What was wrong was the certainty
+    attached to it, and log-loss punishes confident-and-wrong hardest.
+
+    A team's rating is aggregated from six players, so six thin individual
+    estimates compound into one apparently-decisive team number. `evidence`
+    is the matches behind the THINNER of the two sides, because a confident
+    call needs both sides known, not just one.
+
+    Shrinking toward 0.5 cannot change which side is favoured, so nothing
+    downstream that reads the ranking is affected -- only the confidence.
+    """
+    n = max(0.0, float(evidence))
+    weight = n / (n + k) if (n + k) > 0 else 0.0
+    return 0.5 + (float(p) - 0.5) * weight
+
+
 # ---------------------------------------------------------------- models
 class Elo:
     """Chess-style anchor: init 1000 (not 1500) so an average player sits near
@@ -116,20 +147,45 @@ class Elo:
 
 
 class OpenSkill:
-    def __init__(self, **kw):
+    """`damping` is the evidence constant for damped_probability(); pass
+    None to predict raw (what the ladder did before 2026-09-14, kept so a
+    backtest can measure the difference rather than assume it)."""
+
+    def __init__(self, damping=EVIDENCE_K, **kw):
         self.m = PlackettLuce(**kw)
         self.r = defaultdict(self.m.rating)
+        self.games = defaultdict(int)
+        self.damping = damping
+
+    def evidence(self, t1, t2):
+        """Matches behind the thinner side -- a call needs both sides known."""
+        return min(sum(self.games[p] for p in t1) / max(len(t1), 1),
+                   sum(self.games[p] for p in t2) / max(len(t2), 1))
+
+    def predict_raw(self, t1, t2):
+        """Undamped model output: which side it leans to, and how hard.
+
+        Kept separate because the lean stays informative even when the
+        confidence has been damped away to nothing -- a reader wants to know
+        the ladder favours team A while also knowing it has no grounds yet.
+        """
+        return self.m.predict_win([[self.r[p] for p in t1], [self.r[p] for p in t2]])[0]
 
     def predict(self, t1, t2):
-        return self.m.predict_win([[self.r[p] for p in t1], [self.r[p] for p in t2]])[0]
+        p = self.predict_raw(t1, t2)
+        if self.damping is None:
+            return p
+        return damped_probability(p, self.evidence(t1, t2), self.damping)
 
     def update(self, t1, t2, y):
         a, b = [self.r[p] for p in t1], [self.r[p] for p in t2]
         na, nb = self.m.rate([a, b], ranks=[1, 2] if y == 1.0 else [2, 1])
         for p, r in zip(t1, na):
             self.r[p] = r
+            self.games[p] += 1
         for p, r in zip(t2, nb):
             self.r[p] = r
+            self.games[p] += 1
 
     def widen_at_season_boundary(self, factor=1.5):
         """Carry mu forward across a season, but widen sigma back up (capped
