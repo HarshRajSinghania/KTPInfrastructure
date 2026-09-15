@@ -457,6 +457,10 @@ ORDER BY half, event_type
         _i(profile_contract.get("requires_capture_schema")) == 22
         or abs(_f(profile_contract.get("requires_position_interval")) - 2.0) <= 0.01
     )
+    # Deliberately MATCH-level, unlike match_analytics' per-stream gating: this
+    # profile declares it needs an authorized capture, and prepare_lane_b_pages
+    # hard-requires the "available" lifecycle shape, so splitting it per stream
+    # means teaching that validator the withheld shape in the same change.
     if requires_schema22 and not capture_authorization["authorized"]:
         errors = "; ".join(capture_authorization.get("errors") or [])
         raise ValueError(
