@@ -84,8 +84,21 @@ BANLIST_STALE_SEC=900
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# ---- Previous "down" set ----
+# Read before the checks run, not after, because the disk thresholds below latch
+# on it: an item already reported stays reported until it clears the lower bound.
+PREV_LIST=$(mktemp)
+trap 'rm -f "$PREV_LIST"' EXIT
+if [ -f "$STATE_FILE" ]; then
+    jq -r '.down[]?' < "$STATE_FILE" 2>/dev/null | sort -u > "$PREV_LIST" || : > "$PREV_LIST"
+fi
+
 # ---- Collect current "down" set ----
 down=()
+# key -> magnitude, shown in the alert body. Deliberately NOT part of the key:
+# a number inside a key makes every change of that number read to the set
+# comparison as one recovery plus one new failure.
+declare -A detail=()
 
 for svc in "${CRITICAL_SERVICES[@]}"; do
     state=$(systemctl is-active "$svc" 2>/dev/null || true)
@@ -208,6 +221,11 @@ DISK_PCT_WARN="${DISK_PCT_WARN:-75}"
 DISK_GROWTH_WARN_GIB="${DISK_GROWTH_WARN_GIB:-3}"
 # Extrapolating GiB/day from a 1h window turns every transient into an alert.
 DISK_GROWTH_MIN_HOURS="${DISK_GROWTH_MIN_HOURS:-12}"
+# Clear levels, always strictly below the warn level. A value parked on a
+# threshold crosses it in both directions hour after hour, and every crossing is
+# a Discord alert; between warn and clear the previous verdict is held instead.
+DISK_PCT_CLEAR="${DISK_PCT_CLEAR:-$(( DISK_PCT_WARN - 3 ))}"
+DISK_GROWTH_CLEAR_GIB="${DISK_GROWTH_CLEAR_GIB:-$(( DISK_GROWTH_WARN_GIB * 2 / 3 ))}"
 
 now_epoch=$(date +%s)
 now_ts=$(ts)
@@ -220,16 +238,27 @@ fi
 # still resolves on the day after a rotation.
 disk_history() { cat "$DISK_HISTORY" "$DISK_HISTORY.1" 2>/dev/null || true; }
 
-# Bucket reported values — an unbucketed "78%" ticking to "79%" reads to the
-# set comparison below as one recovery plus one new failure, i.e. hourly spam.
-bucket5() { echo $(( ${1:-0} / 5 * 5 )); }
-bucket_gib() {
-    local b=0 t
-    for t in 3 5 10 20 40 80 160 320; do
-        if [ "${1:-0}" -ge "$t" ]; then b=$t; fi
-    done
-    echo "$b"
+# >>> ktp-alert-latch — extracted verbatim by tests/unit/test_health_disk_deadband.py
+# Bucketing the measured value INTO the key was the first attempt at stopping
+# hourly spam, and it moved the problem rather than solving it: "3GiB/day+"
+# ticking to "5GiB/day+" still reads to the set comparison as one recovery plus
+# one new failure, so the channel announced a recovery that never happened. Over
+# 2026-04-20..09-15 that was 14 of the 32 disk-growth alerts. The key is now
+# constant for as long as the condition holds, and the magnitude rides along in
+# `detail` for the alert body only.
+prev_down() { grep -qxF "$1" "$PREV_LIST" 2>/dev/null; }
+
+# latched <key> <value> <warn> <clear> -> 0 if the item should be reported.
+# Fires at >= warn. Clears below clear. Between the two it holds whatever the
+# last run decided, so a value parked on a threshold cannot oscillate.
+latched() {
+    local key=$1 val=$2 warn=$3 clear=$4
+    [[ $val =~ ^-?[0-9]+$ ]] || return 1
+    if [ "$val" -ge "$warn" ]; then return 0; fi
+    if [ "$val" -ge "$clear" ] && prev_down "$key"; then return 0; fi
+    return 1
 }
+# <<< ktp-alert-latch
 
 growth_cutoff=$(( now_epoch - DISK_GROWTH_MIN_HOURS * 3600 ))
 # -k so the arithmetic stays integer KiB; pseudo-filesystems carry no trend.
@@ -259,20 +288,17 @@ while read -r fs size used avail pct mount; do
 
     echo "[$now_ts] disk $mount ${pct}% used, inodes ${ipct:-?}%, 24h rate ${rate:-n/a} GiB/day"
 
-    case "$pct" in
-        ''|*[!0-9]*) ;;
-        *) if [ "$pct" -ge "$DISK_PCT_WARN" ]; then
-               down+=("disk-usage:${mount}=$(bucket5 "$pct")%+")
-           fi ;;
-    esac
-    case "${ipct:-}" in
-        ''|*[!0-9]*) ;;
-        *) if [ "$ipct" -ge "$DISK_PCT_WARN" ]; then
-               down+=("disk-inodes:${mount}=$(bucket5 "$ipct")%+")
-           fi ;;
-    esac
-    if [ -n "$rate" ] && [ "$rate" -ge "$DISK_GROWTH_WARN_GIB" ]; then
-        down+=("disk-growth:${mount}=$(bucket_gib "$rate")GiB/day+")
+    key="disk-usage:${mount}"
+    if latched "$key" "$pct" "$DISK_PCT_WARN" "$DISK_PCT_CLEAR"; then
+        down+=("$key"); detail[$key]="${pct}% used"
+    fi
+    key="disk-inodes:${mount}"
+    if latched "$key" "${ipct:-}" "$DISK_PCT_WARN" "$DISK_PCT_CLEAR"; then
+        down+=("$key"); detail[$key]="${ipct}% of inodes used"
+    fi
+    key="disk-growth:${mount}"
+    if latched "$key" "${rate:-}" "$DISK_GROWTH_WARN_GIB" "$DISK_GROWTH_CLEAR_GIB"; then
+        down+=("$key"); detail[$key]="${rate} GiB/day over the last ${DISK_GROWTH_MIN_HOURS}h+"
     fi
 done <<< "$disk_rows"
 
@@ -287,20 +313,14 @@ done <<< "$log_top"
 
 # ---- Build sorted lists for set comparison ----
 # curr.list: sorted, deduplicated set of currently-down items
-# prev.list: same from the previous run's state file
-TMP_CURR=$(mktemp) TMP_PREV=$(mktemp)
+# prev.list: read at the top of the run, because the disk checks latch on it
+TMP_CURR=$(mktemp) TMP_PREV="$PREV_LIST"
 trap 'rm -f "$TMP_CURR" "$TMP_PREV" /tmp/ktp-health-resp.txt' EXIT
 
 if [ ${#down[@]} -gt 0 ]; then
     printf '%s\n' "${down[@]}" | sort -u > "$TMP_CURR"
 else
     : > "$TMP_CURR"
-fi
-
-if [ -f "$STATE_FILE" ]; then
-    jq -r '.down[]?' < "$STATE_FILE" 2>/dev/null | sort -u > "$TMP_PREV"
-else
-    : > "$TMP_PREV"
 fi
 
 # ---- Compute transitions via comm ----
@@ -349,7 +369,7 @@ desc=""
 if [ ${#new_down[@]} -gt 0 ]; then
     desc+='⚠️ **Services down:**'$'\n'
     for x in "${new_down[@]}"; do
-        desc+="• \`${x}\`"$'\n'
+        desc+="• \`${x}\`${detail[$x]:+ — ${detail[$x]}}"$'\n'
     done
 fi
 if [ ${#recovered[@]} -gt 0 ]; then
