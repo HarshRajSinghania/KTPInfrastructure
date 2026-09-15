@@ -51,6 +51,10 @@ windows live in `config/analytics/spatial_maps/dod_anzio.json`.
 `spatial_map_geometry.py` turns a map's `overview` block into the
 world-to-overview projection pair the match report draws with; it refuses a
 `ROTATED 1` overview rather than guess the axis swap.
+`render_overview_bmp.py` makes the overview BMP itself from a map's BSP: the
+1024x768 8-bit file keyed on palette colour RGB(0,255,0), drawn with that same
+projection (and the ROTATED 1 branch, verified against `dod_thunder`), with
+ZOOM/ORIGIN derived from `models[0]` bounds unless `--descriptor` supplies them.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
