@@ -29,12 +29,16 @@ def _pad4(blob: bytes) -> bytes:
     return blob + b"\0" * (-len(blob) % 4)
 
 
-def build_bsp(quads, entities="", brush_models=()):
+def build_bsp(quads, entities="", brush_models=(), clip_plane_z=None, empty_above=True):
     """A BSP v30 holding horizontal quads.
 
     `quads` is a list of (x0, y0, x1, y1, z, texture, facing_up). Each
     becomes one face on its own plane. `brush_models` lists (first, count)
     face ranges that become models 1.. so an entity can own them.
+
+    `clip_plane_z` gives the map a one-node player hull split at that height;
+    `empty_above` says which side a player fits in. Without it the clipnode
+    lump is empty, which is how a BSP with no hull 1 reads.
     """
     planes, verts, faces, edges, surfedges, texinfo = [], [], [], [], [], []
     names = []
@@ -67,6 +71,15 @@ def build_bsp(quads, entities="", brush_models=()):
     lumps[ov.LUMP_FACES] = b"".join(struct.pack("<HHihh4Bi", *f, 0, 255, 255, 255, -1) for f in faces)
     lumps[ov.LUMP_EDGES] = b"".join(struct.pack("<HH", *e) for e in edges)
     lumps[ov.LUMP_SURFEDGES] = b"".join(struct.pack("<i", s) for s in surfedges)
+
+    head = -1
+    if clip_plane_z is not None:
+        head = 0
+        planes.append((0.0, 0.0, 1.0, float(clip_plane_z), 2))
+        lumps[ov.LUMP_PLANES] = b"".join(struct.pack("<ffffi", *p) for p in planes)
+        empty, solid = ov.CONTENTS_EMPTY, -2
+        front, back = (empty, solid) if empty_above else (solid, empty)
+        lumps[ov.LUMP_CLIPNODES] = struct.pack("<ihh", len(planes) - 1, front, back)
 
     world_count = len(faces) - sum(count for _, count in brush_models)
     xs = [v[0] for v in verts] or [0.0]
@@ -250,8 +263,9 @@ class Geometry(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
 
-    def mask(self, quads, entities=SPAWN, **kwargs):
-        bmp, facts = ov.render(write_bsp(self.tmp, "m", build_bsp(quads, entities)), **kwargs)
+    def mask(self, quads, entities=SPAWN, clip_plane_z=None, empty_above=True, **kwargs):
+        data = build_bsp(quads, entities, clip_plane_z=clip_plane_z, empty_above=empty_above)
+        bmp, facts = ov.render(write_bsp(self.tmp, "m", data), **kwargs)
         return ov.opaque_mask(ov.decode_bmp(bmp)), facts
 
     def test_slab_lands_where_the_projection_puts_it(self):
@@ -270,9 +284,23 @@ class Geometry(unittest.TestCase):
         self.assertEqual(opaque_box(flat), (496, 527, 320, 447))
         self.assertEqual(opaque_box(rotated), (448, 575, 368, 399))
 
-    def test_roof_above_the_ceiling_is_dropped_and_floor_is_kept(self):
+    def test_without_clipnodes_the_ceiling_falls_back_to_entity_anchors(self):
         _, facts = self.mask([SLAB, ROOF])
         self.assertEqual(facts["ceiling"], 36.0 + ov.STANDING_HEADROOM)
+        self.assertEqual(facts["faces_drawn"], 1)
+
+    def test_a_roof_a_player_can_stand_on_raises_the_ceiling_above_it(self):
+        # hull 1 is empty above z 8, so the roof at 320 is a floor and survives.
+        _, facts = self.mask([SLAB, ROOF], clip_plane_z=8.0, empty_above=True)
+        self.assertIn("standable", facts["ceiling_rule"])
+        self.assertEqual(facts["ceiling"], 320.0 + ov.STANDING_HEADROOM)
+        self.assertEqual(facts["faces_drawn"], 2)
+
+    def test_a_roof_with_no_headroom_is_not_a_floor_and_the_cut_lands_under_it(self):
+        # hull 1 is solid above z 330, so nothing fits over the roof at 320.
+        _, facts = self.mask([SLAB, ROOF], clip_plane_z=330.0, empty_above=False)
+        self.assertIn("standable", facts["ceiling_rule"])
+        self.assertEqual(facts["ceiling"], 0.0 + ov.STANDING_HEADROOM)
         self.assertEqual(facts["faces_drawn"], 1)
 
     def test_no_cut_draws_the_roof(self):
@@ -295,6 +323,18 @@ class Geometry(unittest.TestCase):
         ceiling = (-256.0, -256.0, 256.0, 256.0, 100.0, "plaster", False)
         _, facts = self.mask([sky, ceiling], no_cut=True)
         self.assertEqual(facts["faces_drawn"], 0)
+
+    def test_a_masked_texture_paints_nothing_and_reveals_what_is_under_it(self):
+        foliage = (-256.0, -256.0, 256.0, 256.0, 64.0, "{k2_bush1", True)
+        mask, facts = self.mask([SLAB, foliage], projection=ov.Projection(1.0, 0.0, 0.0, False))
+        self.assertEqual(facts["faces_drawn"], 1)
+        self.assertEqual(sum(mask), 64 * 64)            # the slab's footprint, not the foliage's
+
+    def test_masked_foliage_over_void_leaves_the_key(self):
+        foliage = (-256.0, -256.0, 256.0, 256.0, 64.0, "{pk_chleaves1c", True)
+        mask, facts = self.mask([foliage], projection=ov.Projection(1.0, 0.0, 0.0, False))
+        self.assertEqual(facts["faces_drawn"], 0)
+        self.assertEqual(sum(mask), 0)
 
     def test_water_gets_its_own_index_and_drops_get_an_outline(self):
         water = (-256.0, -256.0, 0.0, 256.0, -32.0, "!water", True)
@@ -332,11 +372,22 @@ class Rejects(unittest.TestCase):
 class Footprint(unittest.TestCase):
     """Render with the shipped descriptor and compare opaque regions with the
     shipped BMP. Only maps whose shipped BMP actually uses the key can be
-    compared; the wrong-rotation control must score clearly lower."""
+    compared; the wrong-rotation control must score clearly lower.
 
-    CASES = {"dod_halle": 0.95, "dod_heutau": 0.95, "dod_koln": 0.95, "dod_thunder2": 0.95,
-             "dod_ramelle": 0.90, "dod_siena_test": 0.90, "dod_anjou_a4": 0.90,
-             "dod_thunder": 0.90}   # ROTATED 1
+    The corpus is the fleet's own `dod/` tree. A map NAME is not a map: a retail
+    Steam install ships different builds under the same names, and its
+    `dod_heutau` pair scores 0.70 where the fleet's scores 0.99. Point CORPUS at
+    a game host's tree, not at Steam, or every floor here reads as a regression.
+
+    Floors sit just under what the fleet corpus measures, so they fail on a real
+    loss rather than absorbing one. The terrain cases are here because open
+    ground is where this renderer is weakest."""
+
+    CASES = {"dod_halle": 0.98, "dod_heutau": 0.98, "dod_koln": 0.97, "dod_thunder2": 0.97,
+             "dod_ramelle": 0.98, "dod_siena_test": 0.94, "dod_anjou_a4": 0.94,
+             "dod_thunder": 0.95,        # ROTATED 1
+             "dod_caen2": 0.98, "para_kraftstoff": 0.93,
+             "dod_railroad2_test": 0.79, "dod_railyard_s9a": 0.86}
 
     def test_footprints_match_and_the_control_does_not(self):
         root = Path(CORPUS)
@@ -354,6 +405,30 @@ class Footprint(unittest.TestCase):
                                     not projection.rotated)
             wrong = iou(ov.opaque_mask(ov.decode_bmp(ov.render(bsp, control)[0])), shipped)
             self.assertLess(wrong, score - 0.3, f"{name}: wrong rotation scored {wrong:.3f}")
+
+    def test_the_ceiling_comes_from_hull_1_and_clips_nothing_the_reference_draws(self):
+        """These maps caught the entity-anchored ceiling slicing a top floor off.
+
+        Two properties, not two numbers: the ceiling is decided by the player
+        hull, and cutting at it costs nothing against the shipped image.
+        `dod_caen2` failed both -- ceiling 256 against a top floor at 400, IoU
+        0.848 where uncut scored 0.988. Measured over 57 aligned maps in two
+        corpora, this cut and no cut at all give the identical mask every time.
+        """
+        root = Path(CORPUS)
+        for name in ("dod_caen2", "para_kraftstoff", "dod_ramelle", "dod_halle"):
+            bsp_path = root / "maps" / f"{name}.bsp"
+            if not bsp_path.exists():
+                self.fail(f"{name}: corpus is missing the BSP")
+            _, rule = ov.default_ceiling(ov.parse_bsp(bsp_path))
+            self.assertIn("standable", rule, f"{name}: ceiling did not come from hull 1")
+
+            projection = ov.read_descriptor(root / "overviews" / f"{name}.txt")
+            shipped = ov.opaque_mask(ov.decode_bmp((root / "overviews" / f"{name}.bmp").read_bytes()))
+            cut = iou(ov.opaque_mask(ov.decode_bmp(ov.render(bsp_path, projection)[0])), shipped)
+            whole = iou(ov.opaque_mask(ov.decode_bmp(
+                ov.render(bsp_path, projection, no_cut=True)[0])), shipped)
+            self.assertEqual(cut, whole, f"{name}: the ceiling cost {whole - cut:.4f} of IoU")
 
 
 if __name__ == "__main__":
