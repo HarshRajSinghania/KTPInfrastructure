@@ -39,12 +39,18 @@ net, POST/MISC1 = end-of-frame/other.
 
 ## Severity
 
-  - RED    — a ≥25ms fingerprint fired ≥20 times yesterday AND above its
-             trailing mean + 2.5σ (warmup fallback while <4 days of daily
-             history: ≥50 occurrences).
+  - RED    — a ≥25ms fingerprint cleared BREACH_FLOOR yesterday AND sat
+             above its trailing mean + BREACH_SIGMA σ (warmup fallback
+             while daily history is short: WARMUP_RED_FLOOR).
   - YELLOW — new fingerprints; or a 10-25ms fingerprint breaching the
-             same rule; or any ≥100ms fingerprint with ≥5 occurrences.
+             same rule; or a ≥100ms fingerprint at SEVERE_YELLOW_FLOOR.
   - GREEN  — steady state.
+
+Every floor is calibrated against what this fleet actually produces, not
+against a plausible-looking round number: set one above the fleet's
+observed range and its whole branch stops being reachable, which reads as
+a quiet steady state rather than as a broken gate. The reachability of
+each is asserted in tests/unit/test_spike_digest_severity.py.
 
 ## CLI
 
@@ -105,9 +111,13 @@ BUCKET_ORDER = ["1s+", "500ms-1s", "250-500ms", "100-250ms", "50-100ms",
 BASELINE_WINDOW_DAYS = 7
 MIN_BASELINE_DAYS = 4           # same warmup discipline as ktp-perf-rollup
 BREACH_SIGMA = 2.5              # Poisson-tail tolerance, matches rollup spikes
-BREACH_FLOOR = 20               # occurrences/day below which no breach fires
+# Both floors sit under the fleet's observed range on purpose: a floor above the
+# worst day this fleet produces makes the σ test unreachable rather than strict,
+# and the digest then has no path to any colour but green.
+# tests/unit/test_spike_digest_severity.py holds that — re-derive there.
+BREACH_FLOOR = 8                # occurrences/day below which no breach fires
 WARMUP_RED_FLOOR = 50           # absolute red floor while daily history <4 days
-SEVERE_YELLOW_FLOOR = 5         # ≥100ms fingerprints at this count are never green
+SEVERE_YELLOW_FLOOR = 1         # a ≥100ms frame is rare enough that one is the event
 GONE_QUIET_LIFETIME_MIN = 500   # only historically-significant classes
 GONE_QUIET_WINDOW_DAYS = 10     # show for ~a week after a class dies, then drop
 
