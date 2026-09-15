@@ -36,6 +36,44 @@ allowlist of `@hostinfo` assignment keys.
   lack it too. `tests/unit/test_deploy_restart_example_guard.py` asserts that
   drift, so reconciling it fails the test loudly instead of passing in silence.
 
+### `tier2`: pin the reviewed KTPMatchHandler build to 0.10.173 (2026-09-14)
+
+The Tier-2 integration workflow pinned `b891b0e` (0.10.170). The fleet ran that
+same build until the `wave-20260913T182820Z` swap activated 0.10.172 at the
+03:00 ET restart on 09-14, so the pin became the stale half of a parity that had
+held until then.
+
+- Pin moves to `b3b3d93` (0.10.173, the `KTPMatchHandler`#37 merge), not to the
+  0.10.172 the fleet currently runs. 0.10.173 is merged and unstaged, and it
+  fixes an AC flush cursor rotation that duplicated and dropped shots; pinning it
+  smokes the next build against current infra before it reaches a wave, which is
+  worth more here than mirroring what is already deployed.
+- One line. The asserted version is derived by `sed` from the pinned source, so
+  the ref is the only thing to bump; `KTP_EXPECTED_MATCHHANDLER_VERSION` stays
+  blank and follows the pin.
+- No runner-side change: the workflow compiles the pinned source in test mode and
+  `install -D`s it, so the artifact on the runner is replaced on the next run.
+- The job path-filters itself and runs pytest only when `tests/integration/`,
+  `tests/smoke/` or this workflow change. This PR touches the workflow, so the
+  integration tests do run against 0.10.173 here.
+
+### `scripts`, `ops`, `docs`: five scripts that ran only on the hosts are committed (2026-09-13)
+
+Captured read-only on 2026-09-13 and committed byte-identical, so each installed copy's md5 equals its blob.
+
+- `scripts/ktp-kernel-update.sh`: `/usr/local/sbin` on all five game hosts, one md5 everywhere. A one-shot
+  `apt-get upgrade` then `systemctl reboot`, last run 2026-08-25 01:00-01:40 ET, with nothing scheduling it now.
+  It sets no GRUB default, so it boots whatever entry 0 is; see `docs/runbooks/GRUB_DEFAULT_KERNEL.md`.
+- `ops/rc-local/<host>/rc.local`: `/etc/rc.local` on all five game hosts. Atlanta, Dallas and New York
+  share one file, Denver's differs only in the NIC name, and Chicago's is the older provisioner layout.
+  None of the three matches today's `provision-gameserver.sh` heredoc.
+- `scripts/ktp-identity-reconcile-fetch.sh`: the data server's `ExecStartPre` for `ktp-identity-reconcile.service`.
+  It reads `GH_TOKEN` from the environment; nothing secret is in the file.
+- `scripts/curl_smoke.py`: the KTPAmxxCurl boot/changelevel/quit smoke in `/opt/ktp-tier2-runner`. Its rcon
+  password is a fixed value for a throwaway `sv_lan` server on 127.0.0.1.
+- `docs/LIVE_SCRIPT_INVENTORY.md`: those rows now read MATCH with full md5s; Atlanta and Dallas `rc.local` added.
+- Deploy: nothing changes on any host. The installed copies still need manifest rows (see the PR).
+
 ### `scripts`: the fleet audit redacts by shape before anything is published (2026-09-14)
 
 `.github/workflows/fleet-audit.yml` posts the drift report to a GitHub issue and
