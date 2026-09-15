@@ -195,10 +195,13 @@ the cross-check that the two measurements are of the same thing.
 
 Measured on `dod-27015` with a case-insensitive match and a positive control.
 
-- ⚠️ **`dod_flugplatz.BMP` is upper case on the fleet.** The engine requests
+- ⚠️ **`dod_flugplatz.BMP` is upper case on all 24 instances.** The engine requests
   `overviews/dod_flugplatz.bmp`; Linux is case-sensitive; the file is present on disk and
   invisible in game. **Rename it to `.bmp`.** The workstation copy is upper case too, which
-  is why this survived — it works on Windows.
+  is why this survived — it works on Windows. Swept across all five game hosts: every
+  instance reports exactly one upper-case name out of 69, so this is uniform, not drift.
+  ⚠️ **A `ls *.bmp` sweep cannot see it** — that glob is case-sensitive on the host and the
+  file it misses is the one that matters. Match case-insensitively.
 - **Three descriptors have no image at all**: `dod_anzio2_test`, `dod_emmanuel_b3`,
   `dod_railyard_b5`. The first two have a `.bsp`, so those maps are playable with a
   descriptor pointing at nothing.
