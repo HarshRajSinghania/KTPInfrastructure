@@ -130,27 +130,39 @@ ALTERNATE_HASHES = {
     # recognise this one" is not a reason to withhold its bytes.
 }
 
-# Standard US-vs-Wehrmacht weapon kit. Each tuple: (family, p_base, w_base).
-# `.mdl` extension implicit. Primary variants only: the _l/l lowered/left-hand
-# pose variants were PRUNED 2026-05-13 (operator call — not stock DoD, likely
-# community-mod files; they put MissingFiles noise in every clean-install
-# session without contributing verdict weight). Do not re-add without confirming
-# they are stock DoD files.
+# Standard US-vs-Wehrmacht weapon kit. Each tuple: (family, [p_bases], w_base).
+# `.mdl` extension implicit; a family may hold several p_ models (bipod up/down).
+#
+# 🔑 A held-model name is the one the GAME BINARY loads, never the one that happens
+# to sit in a server tree: the fleet install carries a community pack of ~23 extra
+# p_*.mdl the engine never references. Confirm a name with `strings` over
+# dod/dlls/dod.so + dod/cl_dlls/client.so before adding it here.
+#
+# p_bar/p_mp44 were exactly that mistake — carried here until 2026-09-15, present on
+# the fleet tree, referenced by the binary 0 times, and reported missing by 690 of 691
+# client scans. The real held models are p_barbu/p_barbd and p_stg44, which went
+# unhashed for as long as the dead names sat in their place.
+#
+# ⚠️ The 2026-05-13 prune of "the _l/l pose variants" rests on a half-false premise
+# and is an OPERATOR call to revisit, not a silent fix: the UNDERSCORE _l lowered
+# models (p_garand_l, p_tommy_l, p_k98_l …) are referenced by the binary and ship in
+# depot 31; the no-underscore ones (p_garandl, p_tommyl …) are the community-mod files.
+# Only the second half was ever "not stock DoD".
 WEAPON_FAMILIES = [
-    ("amerk_grenade",  "p_amerk",   "w_amerk"),
-    ("bar",            "p_bar",     "w_bar"),
-    ("colt",           "p_colt",    "w_colt"),
-    ("garand",         "p_garand",  "w_garand"),
-    ("k43",            "p_k43",     "w_k43"),
-    ("luger",          "p_luger",   "w_luger"),
-    ("m1carb",         "p_m1carb",  "w_m1carb"),
-    ("mp40",           "p_mp40",    "w_mp40"),
-    ("mp44",           "p_mp44",    "w_mp44"),
-    ("k98_unscoped",   "p_k98",     "w_98k"),
-    ("k98_scoped",     "p_k98s",    "w_scoped98k"),
-    ("spade",          "p_spade",   "w_spade"),
-    ("spring",         "p_spring",  "w_spring"),
-    ("tommy",          "p_tommy",   "w_tommy"),
+    ("amerk_grenade",     ["p_amerk"],               "w_amerk"),
+    ("bar",               ["p_barbu", "p_barbd"],    "w_bar"),
+    ("colt",              ["p_colt"],                "w_colt"),
+    ("garand",            ["p_garand"],              "w_garand"),
+    ("k43",               ["p_k43"],                 "w_k43"),
+    ("luger",             ["p_luger"],               "w_luger"),
+    ("m1carb",            ["p_m1carb"],              "w_m1carb"),
+    ("mp40",              ["p_mp40"],                "w_mp40"),
+    ("mp44",              ["p_stg44"],               "w_mp44"),
+    ("k98_unscoped",      ["p_k98"],                 "w_98k"),
+    ("k98_scoped",        ["p_k98s"],                "w_scoped98k"),
+    ("spade",             ["p_spade"],               "w_spade"),
+    ("spring",            ["p_spring"],              "w_spring"),
+    ("tommy",             ["p_tommy"],               "w_tommy"),
 ]
 
 
@@ -373,8 +385,8 @@ def build_manifest(ssh, dod_path, filelist_path):
     seen = {e["path"] for e in entries}
 
     weapon_added = 0
-    for family, p_base, w_base in WEAPON_FAMILIES:
-        for base in (p_base, w_base):
+    for family, p_bases, w_base in WEAPON_FAMILIES:
+        for base in (*p_bases, w_base):
             rel = f"models/{base}.mdl"
             if rel in seen:
                 continue
