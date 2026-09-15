@@ -28,7 +28,10 @@ workstation cannot simply be handed the same access.
 
 More than expected, and it is the useful half:
 
-- `/var/log/ktp-audit-*.md` — every weekly report, world-readable (`0644`)
+- `/var/log/ktp-audit-*.md` — every weekly report, world-readable (`0644`).
+  ⚠️ Reports written before `scripts/audit_redact.py` reached the box hold root's
+  crontab and `/etc/rc.local` **verbatim**; `0644` is a wider audience than that
+  deserves. A checkout carrying the redaction writes them redacted by shape.
 - `/var/log/ktp-fleet-audit.log` — the wrapper's own run log
 - `systemctl show` / `list-units` / `list-timers` for the whole data server
 - the `/opt/ktp-infra` tree
