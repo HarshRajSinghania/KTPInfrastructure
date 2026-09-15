@@ -4,6 +4,10 @@
 (`neindataatl`), read-only. Rows marked **unverified** could not be checked from
 a workstation and need a fleet-side look — see [Unverified](#unverified).
 
+This file answers *what is watched*. [`ALERT_ROUTING.md`](ALERT_ROUTING.md) answers
+*where it lands and how loud*, and carries the producer → lane table, the measured
+per-producer volumes and the severity canon.
+
 ## Why this exists
 
 Nine independent checks alert into Discord, each with its own state file, its
@@ -194,11 +198,14 @@ and why the weekly audit is the only path that reaches the fleet today, are in
 2. Is the LinuxGSM tmux patch currently in place on all 24 instances, and which
    LinuxGSM version is each host running? `ktp-monitor-patch-check.sh` answers
    this in one read-only sweep; it has not been run against production.
-3. Which Discord channels receive which alerts today, and does anyone have
-   notifications on outside working hours? The repo pins
-   `ALERT_CHANNEL=1497957091107668070` (`#ktp-crashes`, consolidated with
-   perf-rollup per the 2026-05-06 operator decision); the rest is routing this
-   repo cannot see.
+3. ~~Which Discord channels receive which alerts today?~~ **Answered 2026-09-15**,
+   measured against all five game hosts and the data server: the full producer →
+   channel table is in [`ALERT_ROUTING.md`](ALERT_ROUTING.md). Seven producers
+   share `#ktp-crashes` (`1497957091107668070`), one of them — the admin bot's
+   `ops_alerts` cog — posting through the Discord gateway rather than the relay,
+   and `ktp-fleet-health.sh` on the game hosts posting to a raw webhook that no
+   relay-side change reaches. **Still open: does anyone have notifications on
+   outside working hours?**
 4. What is the on-call expectation? The failed unit above suggests the honest
    answer is "whoever notices", which is worth stating explicitly rather than
    leaving as an assumption each person makes differently.

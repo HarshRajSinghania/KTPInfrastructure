@@ -1,4 +1,8 @@
 #!/bin/bash
+# Severity/colour canon. Deploy ktp-alert-routing.sh beside this script; a
+# partial deploy must fail loudly here, not post the wrong colour or nothing.
+. "$(dirname "${BASH_SOURCE[0]}")/ktp-alert-routing.sh" || {
+    echo "FATAL: ktp-alert-routing.sh not found beside $0 — deploy it first" >&2; exit 3; }
 # KTP — HLTV proxy liveness check.
 #
 # WHY THIS EXISTS
@@ -195,7 +199,7 @@ if [ "$FAILS" -ge "$FAIL_THRESHOLD" ] && { [ "$LAST_ALERT" -eq 0 ] || [ $((NOW -
     fi
     title="🔴 HLTV proxy DOWN"
     [ "${#MISSING[@]}" -eq 0 ] && title="🔴 HLTV proxy NOT RECORDING"
-    send_alert "$title" "$desc" 15158332 && LAST_ALERT="$NOW"
+    send_alert "$title" "$desc" "$KTP_RED" && LAST_ALERT="$NOW"
 fi
 
 printf 'FAILS=%s\nLAST_ALERT=%s\n' "$FAILS" "$LAST_ALERT" > "$STATE"
