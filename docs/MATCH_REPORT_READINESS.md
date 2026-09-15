@@ -135,9 +135,13 @@ python scripts/spatial_map_registry.py `
   --output-dir build/spatial-map-readiness
 ```
 
-The command scans every `config/local/dod-configs/ktp_*.cfg`, merges reviewed
-evidence from `config/analytics/spatial_maps/registry.json`, and writes JSON and
-Markdown readiness reports. `synthetic_ready` requires reviewed overview/flag/
+The command inventories maps from `config/local/ktp_maps.ini` — the map-to-config
+bindings KTPMatchHandler itself reads — merges reviewed evidence from
+`config/analytics/spatial_maps/registry.json`, and writes JSON and Markdown
+readiness reports. It additionally reports match configs no map is bound to,
+bindings whose config is missing, and configs whose `say` line names a map they
+do not serve; none of those three is a validation failure.
+`synthetic_ready` requires reviewed overview/flag/
 topology geometry, verified bot waypoints, and five synthetic matches.
 `competitive_ready` additionally requires 20 human matches. At present only
 Anzio is synthetic-ready; no map is competitive-ready. Other maps must not

@@ -7,19 +7,150 @@ from scripts import spatial_map_registry as registry
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CONFIG_DIR = ROOT / "config/local/dod-configs"
+MAPS_INI = ROOT / "config/local/ktp_maps.ini"
+
+# Real maps the fleet plays whose match config announces a DIFFERENT name, so
+# the old say-line discovery could not see any of them. These are the control:
+# they must be discovered, and the assertion fails against say-line discovery.
+POOL_MAPS_THE_SAY_LINE_HID = (
+    "dod_lennon5_b1",
+    "dod_armory_b6",
+    "dod_saints2_b3e",
+    "dod_railroad2_s9a",
+    "dod_solitude2",
+)
+
+# The other half of the control. These are the names the say lines announce --
+# strings that are not maps and that nothing can ever load. Discovery must not
+# invent them, and neither must it invent an outright bogus map.
+NAMES_THAT_ARE_NOT_MAPS = (
+    "dod_lennon_test",
+    "dod_saints",
+    "dod_armory_test",
+    "dod_solitude_test",
+    "dod_not_a_map_at_all",
+)
 
 
 def real_registry():
     config = registry.read_json(ROOT / "config/analytics/spatial_maps/registry.json")
-    return registry.build_registry(config, ROOT / "config/local/dod-configs", ROOT)
+    return registry.build_registry(config, CONFIG_DIR, MAPS_INI, ROOT)
 
 
-def test_every_ktp_match_config_is_in_the_valid_registry():
+def discovered_names(result):
+    return {item["map_name"] for item in result["maps"]}
+
+
+def test_maps_the_say_line_hid_are_discovered():
+    names = discovered_names(real_registry())
+    missing = [name for name in POOL_MAPS_THE_SAY_LINE_HID if name not in names]
+    assert not missing, f"pool maps still invisible to discovery: {missing}"
+
+
+def test_names_that_no_map_carries_are_not_discovered():
+    names = discovered_names(real_registry())
+    invented = [name for name in NAMES_THAT_ARE_NOT_MAPS if name in names]
+    assert not invented, f"discovery invented map names: {invented}"
+
+
+def test_discovery_matches_the_bindings_the_server_reads():
     result = real_registry()
-    expected_configs = list((ROOT / "config/local/dod-configs").glob("ktp_*.cfg"))
-    represented_configs = sum(len(item["match_configs"]) for item in result["maps"])
+    assert discovered_names(result) == set(registry.parse_maps_ini(MAPS_INI))
     assert result["valid"], result["errors"]
-    assert represented_configs == len(expected_configs)
+
+
+def test_a_config_no_map_is_bound_to_is_reported_not_dropped():
+    result = real_registry()
+    referenced = {
+        Path(path).name
+        for item in result["maps"]
+        for path in item["match_configs"]
+    }
+    reported = {Path(path).name for path in result["unreferenced_configs"]}
+    on_disk = {path.name for path in CONFIG_DIR.glob("ktp_*.cfg")}
+    assert referenced | reported == on_disk
+    assert not referenced & reported
+
+
+def test_a_binding_with_no_config_keeps_the_map_and_reports_the_gap(tmp_path):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "ktp_real.cfg").write_text("// present\n", encoding="utf-8")
+    maps_ini = tmp_path / "ktp_maps.ini"
+    maps_ini.write_text(
+        "[dod_real]\nconfig = ktp_real.cfg\n\n[dod_dangling]\nconfig = ktp_gone.cfg\n",
+        encoding="utf-8",
+    )
+    found = registry.discover_configs(config_dir, maps_ini, tmp_path)
+    assert set(found.maps) == {"dod_real", "dod_dangling"}
+    assert found.maps["dod_dangling"] == []
+    assert found.unresolved_bindings == ["dod_dangling -> configs/ktp_gone.cfg"]
+    assert not found.errors
+
+
+def test_a_stale_say_line_is_reported_without_steering_discovery(tmp_path):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "ktp_saints.cfg").write_text(
+        "say KTP dod_saints Match Config Executed\n", encoding="utf-8"
+    )
+    maps_ini = tmp_path / "ktp_maps.ini"
+    maps_ini.write_text("[dod_saints2_b3e]\nconfig = ktp_saints.cfg\n", encoding="utf-8")
+    found = registry.discover_configs(config_dir, maps_ini, tmp_path)
+    assert set(found.maps) == {"dod_saints2_b3e"}
+    assert found.announcement_mismatches == [
+        "configs/ktp_saints.cfg: announces dod_saints, bound to dod_saints2_b3e"
+    ]
+
+
+def test_one_config_serving_several_map_revisions_is_not_a_mismatch(tmp_path):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "ktp_anzio.cfg").write_text(
+        "say KTP dod_anzio Match Config Executed\n", encoding="utf-8"
+    )
+    maps_ini = tmp_path / "ktp_maps.ini"
+    maps_ini.write_text(
+        "[dod_anzio]\nconfig = ktp_anzio.cfg\n\n[dod_anzio_test4d]\nconfig = ktp_anzio.cfg\n",
+        encoding="utf-8",
+    )
+    found = registry.discover_configs(config_dir, maps_ini, tmp_path)
+    assert set(found.maps) == {"dod_anzio", "dod_anzio_test4d"}
+    assert found.announcement_mismatches == []
+
+
+def test_a_missing_bindings_file_is_an_error_not_an_empty_inventory(tmp_path):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "ktp_real.cfg").write_text("// present\n", encoding="utf-8")
+    found = registry.discover_configs(config_dir, tmp_path / "absent.ini", tmp_path)
+    assert found.maps == {}
+    assert found.errors == ["absent.ini: map bindings file not found"]
+
+
+def test_ini_parse_mirrors_the_plugin(tmp_path):
+    maps_ini = tmp_path / "ktp_maps.ini"
+    maps_ini.write_text(
+        "; comment\n"
+        "# comment\n"
+        "[DOD_Mixed.bsp]\n"
+        "name = Mixed\n"
+        "config = ktp_mixed.cfg\n"
+        "config = ktp_ignored.cfg\n"
+        "\n"
+        # A section stays open across blank lines until a config key closes it,
+        # so this distant key binds to dod_separated. The plugin does the same.
+        "[dod_separated]\n"
+        "name = Config key is further down\n"
+        "\n"
+        "config = ktp_separated.cfg\n",
+        encoding="utf-8",
+    )
+    assert registry.parse_maps_ini(maps_ini) == {
+        "dod_mixed": "ktp_mixed.cfg",
+        "dod_separated": "ktp_separated.cfg",
+    }
 
 
 def test_only_anzio_is_synthetic_ready_and_none_are_competitive_ready():
@@ -37,29 +168,27 @@ def test_only_anzio_is_synthetic_ready_and_none_are_competitive_ready():
     )
 
 
-def test_next_priority_maps_are_explicit_but_blocked():
+def test_the_review_queue_leads_with_maps_the_fleet_actually_plays():
     by_map = {item["map_name"]: item for item in real_registry()["maps"]}
-    assert [by_map[name]["priority"] for name in (
-        "dod_anzio", "dod_harrington", "dod_lennon_test", "dod_saints"
-    )] == [1, 2, 3, 4]
-    assert all(by_map[name]["status"] == "blocked" for name in (
-        "dod_harrington", "dod_lennon_test", "dod_saints"
-    ))
+    queue = ("dod_anzio", "dod_lennon5_b1", "dod_armory_b6",
+             "dod_harrington", "dod_saints2_b3e", "dod_thunder2")
+    assert [by_map[name]["priority"] for name in queue] == [1, 2, 3, 4, 5, 6]
+    assert all(by_map[name]["status"] == "blocked" for name in queue[1:])
 
 
 def test_ready_map_with_missing_spatial_config_fails_validation(tmp_path):
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
-    (config_dir / "ktp_example.cfg").write_text(
-        "say KTP dod_example Match Config Executed\n", encoding="utf-8"
-    )
+    (config_dir / "ktp_example.cfg").write_text("// present\n", encoding="utf-8")
+    maps_ini = tmp_path / "ktp_maps.ini"
+    maps_ini.write_text("[dod_example]\nconfig = ktp_example.cfg\n", encoding="utf-8")
     config = {
         "minimum_synthetic_matches": 5,
         "minimum_human_matches": 20,
         "defaults": {field: True for field in registry.REVIEW_FIELDS},
         "maps": {"dod_example": {"synthetic_matches": 5}},
     }
-    result = registry.build_registry(config, config_dir, tmp_path)
+    result = registry.build_registry(config, config_dir, maps_ini, tmp_path)
     assert not result["valid"]
     assert "has no spatial_config" in result["errors"][0]
 
@@ -71,4 +200,6 @@ def test_cli_writes_machine_and_human_reports(tmp_path):
     markdown = (tmp_path / "SPATIAL_MAP_READINESS.md").read_text()
     assert payload["counts"]["synthetic_ready"] == 1
     assert "dod_anzio | synthetic_ready" in markdown
-    assert "dod_harrington | blocked" in markdown
+    assert "dod_lennon5_b1 | blocked" in markdown
+    assert "## Bindings whose match config is missing" in markdown
+    assert "## Match configs no map is bound to" in markdown
