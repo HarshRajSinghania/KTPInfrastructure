@@ -85,7 +85,12 @@ damage AS (
             WHEN d.attacker_id = r.player_id AND d.victim_id <> r.player_id
                  AND victim.team <> r.team
                  AND d.weapon IN ('grenade', 'grenade2', 'mills_bomb')
-                THEN d.damage_capped ELSE 0 END), 0) AS grenade_damage
+                THEN d.damage_capped ELSE 0 END), 0) AS grenade_damage,
+        COALESCE(SUM(CASE
+            WHEN d.victim_id = r.player_id AND d.attacker_id <> r.player_id
+                 AND attacker.team <> r.team
+                 AND d.weapon IN ('grenade', 'grenade2', 'mills_bomb')
+                THEN d.damage_capped ELSE 0 END), 0) AS grenade_damage_taken
     FROM roster r
     LEFT JOIN ktp_damage_events d
       ON d.match_id = r.match_id
@@ -93,6 +98,15 @@ damage AS (
     LEFT JOIN roster attacker ON attacker.player_id = d.attacker_id
     LEFT JOIN roster victim ON victim.player_id = d.victim_id
     GROUP BY r.player_id
+),
+scores AS (
+    -- ktp_match_stats half=0 is the daemon's own pre-summed total row (see
+    -- legacy_player_cache.sql) -- objective points scored, DoD's own
+    -- scoreboard value, not a count of captures. dod-objective-score-
+    -- semantics: a capture is worth 1-2 points depending on the flag.
+    SELECT player_id, score
+    FROM ktp_match_stats
+    WHERE match_id = {{MATCH_ID}} AND half = 0
 ),
 captures AS (
     -- Excludes warmup bleed-through: a capture attempt begun before the
@@ -138,12 +152,17 @@ SELECT
     COALESCE(k.headshots, 0) AS headshots,
     COALESCE(k.grenade_kills, 0) AS grenade_kills,
     COALESCE(dmg.grenade_damage, 0) AS grenade_damage,
+    COALESCE(dmg.grenade_damage_taken, 0) AS grenade_damage_taken,
     COALESCE(tk.team_kills, 0) AS team_kills,
     COALESCE(s.suicides, 0) AS suicides,
     COALESCE(dmg.damage_dealt, 0) AS damage_dealt,
     COALESCE(dmg.damage_taken, 0) AS damage_taken,
     COALESCE(dmg.team_damage, 0) AS team_damage,
     COALESCE(dmg.self_damage, 0) AS self_damage,
+    COALESCE(sc.score, 0) AS score,
+    CASE WHEN mc.duration_seconds = 0 THEN NULL
+         ELSE ROUND(COALESCE(sc.score, 0) * 60.0 / mc.duration_seconds, 3)
+         END AS points_per_minute,
     COALESCE(c.capture_credits, 0) AS capture_credits,
     COALESCE(b.cap_breaks, 0) AS cap_breaks,
     COALESCE(w.shots, 0) AS shots,
@@ -178,6 +197,7 @@ LEFT JOIN suicides s ON s.player_id = r.player_id
 LEFT JOIN assists a ON a.player_id = r.player_id
 LEFT JOIN breaks b ON b.player_id = r.player_id
 LEFT JOIN damage dmg ON dmg.player_id = r.player_id
+LEFT JOIN scores sc ON sc.player_id = r.player_id
 LEFT JOIN captures c ON c.player_id = r.player_id
 LEFT JOIN weapon_totals w ON w.player_id = r.player_id
 LEFT JOIN position_coverage p ON p.player_id = r.player_id

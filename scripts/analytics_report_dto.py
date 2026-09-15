@@ -30,7 +30,7 @@ from scripts.in_game_result import unavailable as in_game_unavailable
 from scripts.kill_streaks import DEFINITION as KILL_STREAK_DEFINITION
 from scripts.kill_streaks import DEFINITION_VERSION as KILL_STREAK_DEFINITION_VERSION
 
-CONTRACT_VERSION = "analytics-report-dto-v1.2.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
+CONTRACT_VERSION = "analytics-report-dto-v1.3.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
 
 # hlstatsx DATETIMEs are naive league-local time: the data server runs
 # America/New_York. The website column is timestamptz, which reads a naive
@@ -250,7 +250,9 @@ def sanitize_report(report: dict) -> dict:
                 "team", "players", "kills", "deaths", "assists",
                 "damage_dealt", "damage_taken", "team_damage",
                 "capture_credits", "cap_breaks", "shots", "hits",
-                "damage_differential", "raw_accuracy")}
+                "damage_differential", "raw_accuracy",
+                "grenade_kills", "grenade_damage", "grenade_damage_taken",
+                "score", "kills_per_minute", "points_per_minute")}
             | {"team_name": t.get("team_name")}
             for t in report.get("teams") or []
         ],
@@ -264,7 +266,8 @@ def sanitize_report(report: dict) -> dict:
                 "shots", "hits", "raw_accuracy", "kd_ratio",
                 "damage_per_minute", "kills_per_minute", "damage_per_life",
                 "headshot_rate", "fast_2k", "fast_3k", "fast_4k_plus",
-                "best_streak")}
+                "best_streak", "grenade_kills", "grenade_damage",
+                "grenade_damage_taken", "score", "points_per_minute")}
             for p in report.get("players") or []
         ],
         "weapons": [
@@ -418,7 +421,8 @@ PLAYER_HALF_FIELDS = (
     "team_kills", "suicides", "damage_dealt", "damage_taken", "team_damage",
     "damage_differential", "capture_credits", "cap_breaks", "shots", "hits",
     "kd_ratio", "headshot_rate", "raw_accuracy", "damage_per_minute",
-    "kills_per_minute", "best_streak",
+    "kills_per_minute", "best_streak", "grenade_kills", "grenade_damage",
+    "grenade_damage_taken", "score", "points_per_minute",
 )
 
 

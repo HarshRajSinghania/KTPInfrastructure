@@ -224,6 +224,29 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
     assert sum(player["kills"] for player in report["players"]) == 12
     assert sum(player["damage_dealt"] for player in report["players"]) == 1080
     assert sum(player["damage_taken"] for player in report["players"]) == 1080
+
+    # Objective score (ktp_match_stats.score) and grenade damage/kills: both
+    # additive box-score columns, both summed into report["teams"] the same
+    # way kills/damage already are.
+    assert sum(player["score"] for player in report["players"]) == 4
+    by_id = {player["player_id"]: player for player in report["players"]}
+    assert by_id[1]["score"] == 2 and by_id[2]["score"] == 1 and by_id[8]["score"] == 1
+    assert all(player["grenade_damage"] == 0 for player in report["players"])
+    assert all(player["grenade_damage_taken"] == 0 for player in report["players"])
+    assert all(player["grenade_kills"] == 0 for player in report["players"])
+    for team in report["teams"]:
+        assert team["score"] == sum(
+            p["score"] for p in report["players"] if p["team"] == team["team"]
+        )
+        assert team["kills_per_minute"] == round(
+            team["kills"] * 60.0 / report["match"]["duration_seconds"], 3
+        )
+        assert team["points_per_minute"] == round(
+            team["score"] * 60.0 / report["match"]["duration_seconds"], 3
+        )
+        assert team["grenade_kills"] == 0
+        assert team["grenade_damage"] == 0
+        assert team["grenade_damage_taken"] == 0
     assert report["source_coverage"] == {
         "per_hit_damage": True,
         "damage_event_clock": True,
@@ -280,7 +303,7 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
             )
         else:
             assert player["damage_per_life"] is None
-    assert report["schema_version"] == 11
+    assert report["schema_version"] == 12
     assert report["shadow_timelines"]["status"] == "available"
     assert len(report["shadow_timelines"]["opening_duels"]) == 2
     assert report["shadow_timelines"]["fast_multikills"] == []

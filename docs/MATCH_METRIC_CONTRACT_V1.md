@@ -38,6 +38,9 @@ regression update.
 | `unique_capture_events` | Count after grouping capture credits by match, half, team, flag name, and event time. | Canonical. |
 | `cap_breaks` | Count of PlayerAction rows whose DoD action code is exactly `cap_break`. | Canonical. |
 | `shots`, `hits` | Sums from StatsMe weapon rows. | Descriptive when available. |
+| `score` | DoD's own objective score (`ktp_match_stats.score`), the daemon's running total from the in-game `ObjScore` message. Not a capture count. | Canonical. |
+| `grenade_kills` | `kills` restricted to weapon `grenade`, `grenade2` or `mills_bomb`. | Canonical. |
+| `grenade_damage`, `grenade_damage_taken` | `damage_dealt` / `damage_taken` restricted to the same three weapons. | Canonical when per-hit damage exists. |
 
 Team totals are sums of additive player facts only. Ratios MUST be recomputed
 from team totals rather than averaged across players.
@@ -50,6 +53,7 @@ from team totals rather than averaged across players.
 | `kda_ratio` | `(kills + assists) / deaths`; null when deaths are zero. |
 | `damage_differential` | `damage_dealt - damage_taken`; null when damage taken is unavailable. |
 | `damage_per_minute` | `damage_dealt * 60 / live_duration_seconds`; null for zero duration or replay-compressed input. |
+| `points_per_minute` | `score * 60 / live_duration_seconds`; null for zero duration. `score` is DoD's own objective score (`ktp_match_stats.score`), not a capture count -- a capture is worth 1 or 2 points depending on the flag. |
 | `damage_per_life` | `damage_dealt / deaths`; null when deaths are zero. Only completed lives are represented, so the unfinished final life is deliberately excluded. |
 | `headshot_rate` | `headshots / kills`; null when kills are zero. |
 | `raw_accuracy` | `hits / shots`; null when shots are zero. Descriptive only. |

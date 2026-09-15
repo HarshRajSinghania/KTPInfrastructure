@@ -12,6 +12,7 @@ meaning is not obvious from their names.
 | `analytics-report-dto-v1.0.0` | 7-9 | Box score, trades, multikills, recap speed, ratings, lane analytics, spatial layers |
 | `analytics-report-dto-v1.1.0` | 10 | Adds `in_game_result`, `player_halves`, `lane_analytics.depth_profiles.units`; always carries `ratings.ktpr_v2.display_scale` |
 | `analytics-report-dto-v1.2.0` | 11 | Adds `kill_streaks`, `weapon_sides`, `duels_by_side`, `player_classes`, `players[].best_streak`, `player_halves.rows[].side` and `.best_streak`; cap breaks in `player_halves` take the producer half |
+| `analytics-report-dto-v1.3.0` | 12 | Adds `score`, `points_per_minute`, `grenade_kills`, `grenade_damage`, `grenade_damage_taken` to `teams[]`, `players[]` and `player_halves.rows[]`; `map_profiles` (season aggregate) adds `kills_per_minute` and `points_per_minute` |
 
 Minor versions only add keys. A consumer that matches the
 `analytics-report-dto-v1.` prefix keeps working; one that needs the new blocks
@@ -95,6 +96,45 @@ From v1.2.0 each row also carries:
 A player's side is constant within a half, so any `player_halves` column split
 by `side` is a per-side split.
 
+## `score` / `points_per_minute` (v1.3.0)
+
+`score` is DoD's own objective score (`ktp_match_stats.score`), **not** a
+capture count. A capture is worth 1 or 2 points depending on the flag's own
+player requirement, so a player with 4 captures on a 2-point flag shows
+`score: 8`. See `dod-objective-score-semantics` for the per-map point values.
+`points_per_minute` is `score * 60 / duration_seconds`, `null` when duration
+is 0.
+
+`teams[].score` is the sum of its players' `score`; `teams[].kills_per_minute`
+and `.points_per_minute` divide the team total by the match's own
+`duration_seconds` (not summed per player, since every player shares the same
+match clock). `map_profiles[].kills_per_minute` / `.points_per_minute` do the
+same across every match played on that map: total kills or points across all
+matches, divided by their total duration.
+
+`score` and the three `grenade_*` columns are **not** included in
+`player_halves.reconciled` -- unlike the columns that are, they compare a
+per-half sum against `ktp_match_stats` half=0, which the daemon writes as its
+own independently pre-summed total rather than deriving it the way this
+report derives the half rows, so a mismatch there would not mean what a
+kills/damage mismatch means.
+
+## `grenade_kills` / `grenade_damage` / `grenade_damage_taken` (v1.3.0)
+
+Frags and damage whose weapon is `grenade`, `grenade2` or `mills_bomb`.
+`grenade_damage` / `grenade_damage_taken` only count damage between opposing
+teams, matching `damage_dealt` / `damage_taken`; a grenade kill or damage
+instance against your own team is not counted in either (it lands in
+`team_damage` alongside every other friendly-fire source instead). Both
+`_taken` columns are `null` wherever `damage_taken` is (legacy matches with
+no per-hit damage).
+
+Grenade-kill *locations* are not a new field here: `spatial_layers.frag_vectors`
+already carries `weapon` per line and has been public since 2026-09-09 --
+filter it to the three grenade weapon names for a kill-location map, using
+the same attacker/victim coordinates and team/half/game_time every other
+frag vector carries.
+
 ## Reports built before schema 11
 
 `kill_streaks`, `weapon_sides`, `duels_by_side` and `player_classes` read
@@ -102,6 +142,17 @@ by `side` is a per-side split.
 `null`. Render them as unavailable, never as zero. Matches before the life
 ledger existed (all of S9) build at schema 11 with `status: unavailable` and a
 source flag.
+
+## Reports built before schema 12
+
+`score`, `points_per_minute` and the three `grenade_*` columns are plain
+numeric columns, not a status-wrapped block -- a report built before schema
+12 simply has no key for them, so `players[]`, `teams[]` and
+`player_halves.rows[]` read `null` for all five rather than `0`. Same
+render-as-unavailable rule as above. `report_service generate` only
+regenerates a match automatically when it has no report at the current
+schema at all; an already-published match keeps its old schema's payload
+until explicitly regenerated (`generate <match_id> ...`).
 
 ## `kill_streaks`
 

@@ -91,7 +91,7 @@ from scripts.side_splits import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 11  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits
+SCHEMA_VERSION = 12  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -151,6 +151,7 @@ INTEGER_COLUMNS = {
     "event_epoch", "producer_activation_epoch", "activation_receipt_epoch",
     "match_start_epoch", "start_epoch", "end_epoch",
     "stored_half", "producer_half", "receipt_epoch",
+    "score", "grenade_kills", "grenade_damage", "grenade_damage_taken",
     "attempt_id", "producer_sequence", "entindex", "serial", "weapon_id",
     "owner_player_id", "owner_engine_userid", "allies_in_zone", "axis_in_zone",
 }
@@ -1190,11 +1191,13 @@ def duel_matrix_markdown(matrix: dict[str, Any],
     return "\n".join(lines) + "\n"
 
 
-def team_summary(players: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def team_summary(players: list[dict[str, Any]],
+                 match: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     additive = (
         "kills", "deaths", "assists", "damage_dealt", "damage_taken",
         "team_damage", "self_damage", "capture_credits", "cap_breaks",
-        "shots", "hits",
+        "shots", "hits", "grenade_kills", "grenade_damage",
+        "grenade_damage_taken", "score",
     )
     teams: dict[int, dict[str, Any]] = {}
     for player in players:
@@ -1208,16 +1211,24 @@ def team_summary(players: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row["players"] += 1
         for field in additive:
             row[field] += player.get(field, 0) or 0
+    duration = float((match or {}).get("duration_seconds") or 0)
     for row in teams.values():
         has_taken = all(p.get("damage_taken") is not None
                         for p in players if p.get("team") == row["team"])
         if not has_taken:
             row["damage_taken"] = None
+            row["grenade_damage_taken"] = None
         row["damage_differential"] = (
             row["damage_dealt"] - row["damage_taken"] if has_taken else None
         )
         row["raw_accuracy"] = (
             round(row["hits"] / row["shots"], 3) if row["shots"] else None
+        )
+        row["kills_per_minute"] = (
+            round(row["kills"] * 60.0 / duration, 3) if duration else None
+        )
+        row["points_per_minute"] = (
+            round(row["score"] * 60.0 / duration, 3) if duration else None
         )
     return [teams[key] for key in sorted(teams)]
 
@@ -1650,6 +1661,7 @@ def build_report(
             player["damage_taken"] = None
             player["damage_differential"] = None
             player["grenade_damage"] = None
+            player["grenade_damage_taken"] = None
             player["damage_per_minute"] = (
                 round(damage * 60.0 / duration, 2)
                 if damage is not None and duration else None
@@ -1887,7 +1899,7 @@ def build_report(
         "match": match,
         "quality": quality,
         "source_inventory": inventory,
-        "teams": team_summary(players_public),
+        "teams": team_summary(players_public, match),
         "players": players_public,
         "player_halves": player_halves,
         "kill_streaks": kill_streaks,
