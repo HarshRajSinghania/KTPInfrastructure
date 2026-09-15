@@ -35,18 +35,24 @@ CREATE TABLE hlstats_Events_Frags (
   game_time decimal(10,2) DEFAULT NULL,
   event_epoch bigint unsigned DEFAULT NULL
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- migrate_002 puts `half` on Frags, Teamkills, Suicides and Statsme, and that is
+-- the set source_coverage.player_halves probes: leave it off any one of the four
+-- and every per-half box score is withheld from the report.
 CREATE TABLE hlstats_Events_Teamkills (
-  match_id varchar(64), killerId int, victimId int
+  match_id varchar(64), half tinyint NOT NULL DEFAULT 0,
+  killerId int, victimId int
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE hlstats_Events_Suicides (
-  match_id varchar(64), playerId int
+  match_id varchar(64), half tinyint NOT NULL DEFAULT 0, playerId int
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE hlstats_Events_PlayerPlayerActions (
   id int NOT NULL AUTO_INCREMENT PRIMARY KEY, eventTime datetime,
   match_id varchar(64), playerId int, victimId int, actionId int
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- No producer columns here on purpose: break_producer_half stays false, so
+-- player_half_fact.sql places a cap break by eventTime against the half windows.
 CREATE TABLE hlstats_Events_PlayerActions (
-  match_id varchar(64), playerId int, actionId int
+  match_id varchar(64), eventTime datetime, playerId int, actionId int
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE ktp_damage_events (
   id int NOT NULL AUTO_INCREMENT PRIMARY KEY, match_id varchar(64),
@@ -159,18 +165,19 @@ SET eventTime = DATE_ADD(
     pos_victim_z = 0, k_clip = 4, k_ammo = 40;
 UPDATE hlstats_Events_Frags
 SET frag_context_recorded = 1, event_epoch = UNIX_TIMESTAMP(eventTime);
-INSERT INTO hlstats_Events_Teamkills VALUES
+INSERT INTO hlstats_Events_Teamkills (match_id,half,killerId,victimId) VALUES
+  ('phase-a-contract-TEST',1,1,2);
+INSERT INTO hlstats_Events_Suicides (match_id,half,playerId) VALUES
   ('phase-a-contract-TEST',1,2);
-INSERT INTO hlstats_Events_Suicides VALUES
-  ('phase-a-contract-TEST',2);
 INSERT INTO hlstats_Events_PlayerPlayerActions
   (eventTime,match_id,playerId,victimId,actionId) VALUES
   ('2026-08-16 20:00:20','phase-a-contract-TEST',2,7,1),
   ('2026-08-16 20:00:40','phase-a-contract-TEST',3,8,1),
   ('2026-08-16 20:11:20','phase-a-contract-TEST',9,1,1);
-INSERT INTO hlstats_Events_PlayerActions VALUES
-  ('phase-a-contract-TEST',4,2),
-  ('phase-a-contract-TEST',10,2);
+INSERT INTO hlstats_Events_PlayerActions (match_id,eventTime,playerId,actionId)
+VALUES
+  ('phase-a-contract-TEST','2026-08-16 20:05:00',4,2),
+  ('phase-a-contract-TEST','2026-08-16 20:15:00',10,2);
 
 -- Canonical assist clocks are producer-authored. Generic action receipt rows
 -- above remain the public box-score source, but are not used for life timing.
