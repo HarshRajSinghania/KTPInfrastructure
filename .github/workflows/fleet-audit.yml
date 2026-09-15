@@ -230,9 +230,17 @@ jobs:
           # runs bill against the Claude subscription rather than API credit.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
+          # claude_args is an argument string, not YAML -- a `#` line inside it
+          # is passed to the CLI as an argument, so notes belong out here.
+          #
+          # Overrunning --max-turns FAILS the job even when the triage was
+          # written, and the publish step is skipped behind it: run
+          # 34990174564 finished in 27 turns with is_error false and posted
+          # nothing. The real ceiling is this job's 20-minute timeout, and
+          # those 27 turns cost under five.
           claude_args: |
             --model claude-opus-5
-            --max-turns 20
+            --max-turns 45
             --allowedTools "Read,Write"
           # Read and Write only. Claude cannot run a command, reach the network,
           # or touch GitHub -- it reads a report and writes a file. The step after
