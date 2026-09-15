@@ -87,10 +87,12 @@ KTPR_DISPLAY_SCALE = {
                 "Render as published; do not transform again.",
     },
     "components": {
-        "kind": "raw_z_score",
-        "note": "Raw per-match z-scores, mean 0, negative below average. "
-                "A consumer that must not show negatives has to map these "
-                "itself.",
+        "kind": "floored_index",
+        "center": KTPR_DISPLAY_CENTER,
+        "per_z": KTPR_DISPLAY_PER_Z,
+        "floor": KTPR_DISPLAY_FLOOR,
+        "note": "Same scale as rating (2026-09-14): one transform, applied "
+                "once, here. Render as published; do not transform again.",
     },
 }
 
@@ -348,7 +350,7 @@ def sanitize_report(report: dict) -> dict:
                      or names_by_id.get(p.get("player_id")),
                      "team": p.get("team"),
                      "rating": ktpr_display(p.get("rating")),
-                     "components": {k: _num(v) for k, v in
+                     "components": {k: ktpr_display(v) for k, v in
                                     (p.get("components") or {}).items()}}
                     for p in ktpr.get("players") or []
                 ],
