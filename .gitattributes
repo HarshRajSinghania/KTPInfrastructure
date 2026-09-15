@@ -38,13 +38,13 @@ scripts/hooks/* text eol=lf
 # GRUB fixtures are parsed by bash/awk in tests; a CRLF line breaks the menu and grubenv parsing.
 tests/fixtures/grub_default_kernel/** text eol=lf
 
-# CHANGELOG.md is append-only under `## [Unreleased]`, and every PR inserts its
-# section at the same offset — so merging any one PR conflicts every sibling on
-# this file alone, and the queue re-blocks itself after each merge. Six PRs were
-# hand-resolved on 2026-09-14, all with an identical one-hunk conflict, and
-# merging the first re-conflicted the rest within minutes.
-# `union` keeps BOTH sides of a conflicting hunk, which is the resolution that
-# was applied by hand every time. It is the correct driver only because this
-# file is append-only: never set it on a file where one side's edit is meant to
-# REPLACE the other's.
+# Entries live one file per change in changelog.d/ precisely because every PR
+# used to insert its section at the same offset under `## [Unreleased]`, which
+# conflicted every sibling on this file alone and re-blocked the queue after
+# each merge.
+# `union` keeps BOTH sides of a conflicting hunk — the resolution applied by
+# hand every time — but GitHub does not run merge drivers server-side, so it was
+# never the fix. It is kept for local merges and for the hazard it documents.
+# It is the correct driver only because this file is append-only: never set it
+# on a file where one side's edit is meant to REPLACE the other's.
 CHANGELOG.md merge=union
