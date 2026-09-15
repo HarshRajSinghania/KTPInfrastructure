@@ -84,6 +84,45 @@ BANLIST_STALE_SEC=900
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# >>> ktp-alert-settle — extracted verbatim by tests/unit/test_health_transition_report.py
+# systemd reports `activating`/`deactivating`/`reloading` while a unit is mid-restart, and
+# an hourly cron sampling at :00 lands in the same minute as hltv-restart.timer (03:00 and
+# 11:00 ET). 252 of the 325 alerts logged over 2026-04-20..09-15 fell in hours 03, 04, 11
+# and 12. A transitional state is re-read after a settle delay; a unit still not active
+# then is genuinely stuck and still alerts. One sleep per run, not one per unit.
+SETTLE_SECONDS="${SETTLE_SECONDS:-20}"
+_settle_slept=0
+# Answers in $SETTLED rather than on stdout: a caller writing `s=$(settled_state x)`
+# runs this in a subshell, where the once-per-run latch below is discarded and every
+# transitional unit pays the full delay — 24 proxies, eight minutes.
+settled_state() {
+    local unit=$1
+    SETTLED=$(systemctl is-active "$unit" 2>/dev/null || true)
+    case "$SETTLED" in
+        activating|deactivating|reloading|refreshing)
+            if [ "$_settle_slept" -eq 0 ]; then
+                sleep "$SETTLE_SECONDS"
+                _settle_slept=1
+            fi
+            SETTLED=$(systemctl is-active "$unit" 2>/dev/null || true)
+            ;;
+    esac
+}
+# <<< ktp-alert-settle
+
+# >>> ktp-alert-join — extracted verbatim by tests/unit/test_health_transition_report.py
+# `printf '%s\n' "${arr[@]}" | grep -v '^$' | paste -sd, -` prints one BLANK line for an
+# empty array; grep then matches nothing and exits 1, and under `set -e -o pipefail` that
+# kills the run before the TRANSITIONS line and before the Discord POST. From #207
+# (2026-08-31) until this commit the check could only speak when a failure and a recovery
+# landed in the SAME hourly run — 0 of 42 logged transitions were one-sided, against 257
+# of 283 in the month before. A first-ever failure alerted nobody.
+join_keys() {
+    local IFS=,
+    printf '%s' "$*"
+}
+# <<< ktp-alert-join
+
 # ---- Previous "down" set ----
 # Read before the checks run, not after, because the disk thresholds below latch
 # on it: an item already reported stays reported until it clears the lower bound.
@@ -101,7 +140,7 @@ down=()
 declare -A detail=()
 
 for svc in "${CRITICAL_SERVICES[@]}"; do
-    state=$(systemctl is-active "$svc" 2>/dev/null || true)
+    settled_state "$svc"; state=$SETTLED
     if [ "$state" != "active" ]; then
         down+=("$svc=$state")
     fi
@@ -194,23 +233,50 @@ is_excluded() {
 expected_hltv=0
 active_hltv=0
 missing_hltv=()
+up_ports=()
 for p in $(seq "$HLTV_PORT_START" "$HLTV_PORT_END"); do
     if is_excluded "$p"; then continue; fi
     expected_hltv=$((expected_hltv + 1))
-    state=$(systemctl is-active "hltv@$p" 2>/dev/null || true)
+    settled_state "hltv@$p"; state=$SETTLED
     if [ "$state" = "active" ]; then
         active_hltv=$((active_hltv + 1))
+        up_ports+=("$p")
     else
         missing_hltv+=("hltv@$p=$state")
     fi
 done
 if [ "$active_hltv" -lt "$expected_hltv" ]; then
-    down+=("hltv-instance-count=${active_hltv}/${expected_hltv}")
-    # Also list which specific instance(s) are down so the alert is actionable
+    # Numberless key, magnitude in the body: a count moving 23/24 -> 22/24 reads to
+    # the set comparison as one recovery plus one new failure, the same defect the
+    # disk keys carried until #388.
+    key="hltv-instance-coverage"
+    down+=("$key"); detail[$key]="${active_hltv}/${expected_hltv} proxies active"
+    # Name the instance(s) too, so the alert is actionable on its own.
     for m in "${missing_hltv[@]}"; do
         down+=("$m")
     done
 fi
+
+# >>> ktp-hltv-crashloop — extracted verbatim by tests/unit/test_health_hltv_coverage.py
+# `Restart=always` with `RestartSec=10` outruns systemd's default start-rate limit
+# (5 starts per 10s), so a crash-looping proxy never lands in `failed`: it flaps
+# active↔activating forever and is-active reads `active` most of the time. That is
+# the hung-service shape — unit state answering a question it cannot see — and
+# NRestarts is the only leg that sees it. It counts automatic restarts only and an
+# explicit restart resets it, so the 03:00/11:00 pass re-arms it twice a day.
+HLTV_RESTART_WARN="${HLTV_RESTART_WARN:-3}"
+hltv_unit_restarts() { systemctl show "hltv@$1" -p NRestarts --value 2>/dev/null || true; }
+
+# Only for proxies that ARE up — a port already named above is one fault, and a
+# second token for it would double-count it in the set diff.
+for p in ${up_ports[@]+"${up_ports[@]}"}; do
+    nrestarts=$(hltv_unit_restarts "$p")
+    if [[ $nrestarts =~ ^[0-9]+$ ]] && [ "$nrestarts" -ge "$HLTV_RESTART_WARN" ]; then
+        key="hltv@$p=crash-looping"
+        down+=("$key"); detail[$key]="${nrestarts} automatic restarts since its last clean start"
+    fi
+done
+# <<< ktp-hltv-crashloop
 
 # ---- Disk usage + growth ----
 # No df history existed anywhere on this box (sysstat is installed but its
@@ -360,8 +426,8 @@ fi
 # Names alongside the counts — without them, a recovered blip is
 # undiagnosable after the fact, since only the Discord embed carries which
 # item transitioned.
-new_down_names=$(printf '%s\n' "${new_down[@]}" 2>/dev/null | grep -v '^$' | paste -sd, -)
-recovered_names=$(printf '%s\n' "${recovered[@]}" 2>/dev/null | grep -v '^$' | paste -sd, -)
+new_down_names=$(join_keys "${new_down[@]}")
+recovered_names=$(join_keys "${recovered[@]}")
 echo "[$(ts)] TRANSITIONS: new_down=${#new_down[@]}${new_down_names:+ [${new_down_names}]} recovered=${#recovered[@]}${recovered_names:+ [${recovered_names}]}"
 
 # Build Discord embed body
@@ -382,9 +448,10 @@ fi
 
 # Still-down services (persistent, informational footer)
 if [ ${#down[@]} -gt 0 ]; then
-    current_list=$(printf '%s\n' "${down[@]}" 2>/dev/null | grep -v '^$' | sort -u)
+    mapfile -t down_sorted < <(printf '%s\n' "${down[@]}" | sort -u)
+    current_list=$(join_keys "${down_sorted[@]}")
     if [ -n "$current_list" ]; then
-        desc+=$'\n''_All currently down: '"$(echo "$current_list" | paste -sd, -)"'_'
+        desc+=$'\n''_All currently down: '"${current_list}"'_'
     fi
 fi
 

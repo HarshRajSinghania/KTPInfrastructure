@@ -1,8 +1,10 @@
 import inspect
+import re
 from pathlib import Path
 
 import pytest
 
+from tests.e2e_stats.artifacts import DEFAULT_SCHEMA_FILES, plan_schema_files
 from scripts.lane_b_e2e import (gamerules_clock_preflight,
                                  match_epoch_interval,
                                  persist_preflight_failure,
@@ -117,47 +119,55 @@ def test_manual_lane_accepts_and_records_all_four_bundle_refs():
     assert "args.require_complete_coverage and bool(gaps)" in runner
 
 
-def test_full_and_corpus_lanes_apply_context_migrations_in_order():
-    workflow = (ROOT / ".github/workflows/lane-b-stats-e2e.yml").read_text()
-    life = "/work/build/artifacts/sql/migrate_016_life_events.sql"
-    clocks = "/work/build/artifacts/sql/migrate_017_capture_clocks_and_assists.sql"
-    breaks = "/work/build/artifacts/sql/migrate_018_break_context_correlation.sql"
-    correction = "/work/build/artifacts/sql/migrate_019_clear_uncertified_frag_context.sql"
-    certification = "/work/build/artifacts/sql/migrate_020_frag_context_certified.sql"
-    observability = "/work/build/artifacts/sql/migrate_021_capture_observability.sql"
-    telemetry = "/work/build/artifacts/sql/migrate_022_objective_attempts_grenade_entities.sql"
-    membership = "/work/build/artifacts/sql/migrate_024_team_membership_intervals.sql"
-    position_provenance = "/work/build/artifacts/sql/migrate_025_position_state_map_revision.sql"
+def test_both_lanes_apply_the_context_migrations_the_daemon_ref_carries():
+    """The applied set is DERIVED from the ref under test, never spelled here.
 
-    migrations = (
-        life, clocks, breaks, correction, certification, observability, telemetry,
-        membership, position_provenance,
+    This counted each migration path twice in the workflow text. Once the list
+    moved into DEFAULT_SCHEMA_FILES and both --schema blocks began expanding the
+    builder's schema-migrations.txt, the count went to zero and the assertion
+    sat red on main itself -- worse than no test, because a permanently-red
+    check teaches everyone to skim past the whole lane's failures.
+
+    Workflow shape is guarded in depth by tests/unit/test_lane_b_schema_list_drift.py,
+    which config-tests.yml runs on every PR rather than only inside a Lane B job.
+    """
+    workflow = (ROOT / ".github/workflows/lane-b-stats-e2e.yml").read_text(
+        encoding="utf-8")
+    blocks = [chunk.split("--seed")[0] for chunk in workflow.split("--schema")[1:]]
+    assert len(blocks) == 2, "expected one --schema block per lane (full, corpus)"
+    for block in blocks:
+        assert '"${schema_migrations[@]}"' in block
+        assert not re.search(r"/work/build/artifacts/sql/migrate_\d+", block)
+
+    context = (
+        "sql/migrate_016_life_events.sql",
+        "sql/migrate_017_capture_clocks_and_assists.sql",
+        "sql/migrate_018_break_context_correlation.sql",
+        "sql/migrate_019_clear_uncertified_frag_context.sql",
+        "sql/migrate_020_frag_context_certified.sql",
+        "sql/migrate_021_capture_observability.sql",
+        "sql/migrate_022_objective_attempts_grenade_entities.sql",
+        "sql/migrate_024_team_membership_intervals.sql",
+        "sql/migrate_025_position_state_map_revision.sql",
     )
-    for migration in migrations:
-        if migration in {telemetry, position_provenance}:
-            continue
-        assert workflow.count(migration) == 2
-    # Migrations 022 and 025 also appear once in dedicated production-parity
-    # migration self-test commands; the full/corpus schema lists contain each
-    # migration path exactly twice.
-    assert workflow.count(telemetry) == 3
-    assert workflow.count(position_provenance) == 3
+    assert set(context) <= set(DEFAULT_SCHEMA_FILES)
+    migrations = [rel for rel in DEFAULT_SCHEMA_FILES if "migrate_" in rel]
 
-    def occurrences(value):
-        indexes, offset = [], 0
-        while (found := workflow.find(value, offset)) >= 0:
-            indexes.append(found)
-            offset = found + 1
-        return indexes
+    applied, skipped = plan_schema_files(
+        DEFAULT_SCHEMA_FILES, frozenset(migrations), registered=DEFAULT_SCHEMA_FILES)
+    assert skipped == []
+    assert applied == list(DEFAULT_SCHEMA_FILES)
 
-    migration_indexes = {
-        migration: occurrences(migration)[-2:] for migration in migrations
-    }
-    first = [migration_indexes[migration][0] for migration in migrations]
-    second = [migration_indexes[migration][1] for migration in migrations]
-    assert first == sorted(first)
-    assert second == sorted(second)
-    assert first[-1] < second[0]
+    # A daemon ref cut before the newest migrations still applies every context
+    # one, in registered order, and skips only what the ref does not carry.
+    cutoff = migrations.index("sql/migrate_025_position_state_map_revision.sql")
+    applied, skipped = plan_schema_files(
+        DEFAULT_SCHEMA_FILES, frozenset(migrations[:cutoff + 1]),
+        registered=DEFAULT_SCHEMA_FILES)
+    assert set(context) <= set(applied)
+    assert skipped == migrations[cutoff + 1:]
+    assert set(applied).isdisjoint(skipped)
+    assert [rel for rel in applied if "migrate_" in rel] == migrations[:cutoff + 1]
 
 
 def test_full_lane_carries_target_producer_clock_release_gates():
