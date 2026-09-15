@@ -1,0 +1,16 @@
+// overview description file for dod_railroad2_s9a.bmp
+// Map by Nein_
+// overview by Nein_
+
+global 
+{
+	ZOOM	1.30
+	ORIGIN	136.00	-189.62	-529
+	ROTATED	0
+}
+
+layer 
+{
+	IMAGE	"overviews/dod_railroad2_s9a.bmp"
+	HEIGHT	-529
+}

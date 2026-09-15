@@ -48,3 +48,9 @@ tests/fixtures/grub_default_kernel/** text eol=lf
 # It is the correct driver only because this file is append-only: never set it
 # on a file where one side's edit is meant to REPLACE the other's.
 CHANGELOG.md merge=union
+
+# Overview descriptors are copied to the fleet byte-for-byte and five of the
+# seven here are CRLF as their mapper wrote them. core.autocrlf=input rewrites
+# CRLF on commit, so without this the repo would hold a file nobody authored and
+# the deploy would ship it.
+config/overviews/*.txt -text
