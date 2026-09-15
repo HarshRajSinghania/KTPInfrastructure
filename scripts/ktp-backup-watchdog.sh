@@ -13,6 +13,10 @@
 # so "a backup ran" was never evidence that a given database was in it.
 
 set -uo pipefail
+# Severity/colour canon. Deploy ktp-alert-routing.sh beside this script; a
+# partial deploy must fail loudly here, not post the wrong colour or nothing.
+. "$(dirname "${BASH_SOURCE[0]}")/ktp-alert-routing.sh" || {
+    echo "FATAL: ktp-alert-routing.sh not found beside $0 — deploy it first" >&2; exit 3; }
 
 HEARTBEAT="/var/lib/ktp-backup-lastrun"
 BACKUP_DIR="/opt/backups"
@@ -118,7 +122,7 @@ payload=$(cat <<EOF
   "embeds": [{
     "title": "Backup watchdog: ${#problems[@]} problem(s)",
     "description": "$desc",
-    "color": 16711680,
+    "color": $KTP_RED,
     "footer": { "text": "neindataatl - $(date -u +%Y-%m-%dT%H:%M:%SZ)" }
   }]
 }

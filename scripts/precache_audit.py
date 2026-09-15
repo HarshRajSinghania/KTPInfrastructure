@@ -440,7 +440,7 @@ def build_cron_embed(by_severity: dict, n_paths_total: int, n_locations: int, n_
         color = 15548997  # red
         verdict = "FAIL"
     elif counts["MEDIUM"] > 0 or counts["LOW"] > 0:
-        color = 15844367  # yellow
+        color = 16763904  # yellow (ktp_alert_routing.KTP_YELLOW)
         verdict = "WARN"
     else:
         color = 5763719   # green (shouldn't happen — only called when actionable)
