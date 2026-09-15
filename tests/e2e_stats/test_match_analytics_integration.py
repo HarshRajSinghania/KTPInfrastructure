@@ -255,10 +255,19 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
     assert report["player_classes"]["status"] == "available"
     assert report["in_game_result"]["status"] == "unavailable"
     assert report["in_game_result"]["flags"] == ["observer-root-not-configured"]
+    # A withheld stream names itself and says why: the silent absence is the
+    # defect per-stream authorization exists to fix.
+    absent = "no capture telemetry was recorded for this match"
     assert report["telemetry_lifecycles"] == {
         "privacy": "aggregate_public_private_timeline",
-        "objective_attempts": {"status": "not_captured"},
-        "grenade_entities": {"status": "not_captured"},
+        "objective_attempts": {
+            "status": "not_captured", "stream": "objective_attempt",
+            "withheld_reason": absent,
+        },
+        "grenade_entities": {
+            "status": "not_captured", "stream": "grenade_entity",
+            "withheld_reason": absent,
+        },
         "private_facts": {
             "objective_attempt_timeline": [],
             "grenade_entity_timeline": [],

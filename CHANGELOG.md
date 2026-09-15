@@ -4,6 +4,119 @@ All notable changes to KTP Infrastructure will be documented in this file.
 
 ## [Unreleased]
 
+### `scripts`: world-to-overview projection matrices have a producer (2026-09-14)
+
+The three `world_to_pixel` / `pixel_to_world` matrices the public match report draws with live
+only in `searse/keep-the-prac`, hand-committed, with no generator and no test. This repo had no
+code that emitted, derived or even named them — `world_to_pixel` appeared once on `main`, in a
+docstring.
+
+`spatial_map_geometry.py` derives them from the `overview` block
+`build_competitive_spatial_configs.py` already parses out of each map's `overviews/<map>.txt`
+and BMP header: scale is `zoom / 8`, because one overview pixel is 8 world units at zoom 1.0,
+and the map origin lands on the image centre.
+
+- The derivation reproduces all three shipped matrices to 1e-9, and that equality is pinned as
+  a test. Replacing the hand-maintained table is therefore a provable no-op rather than a
+  hopeful one.
+- `geometry_version` is a digest over the canonical projection facts, so it is reproducible and
+  moves when any input does. The three strings in the website's table are not reproducible —
+  nothing in either repo computes them — so the pin compares matrices, never version strings.
+- `ROTATED 1` raises `UnsupportedOverview`. The axis swap for it is untested against any real
+  map, and getting it wrong does not look wrong: it renders a confident picture of the wrong
+  place. `dod_saints2_b3e` is the one map in the current pool that ships `ROTATED 1`.
+### `scripts`: spatial map discovery reads the bindings the server reads, not a chat line (2026-09-14)
+
+`spatial_map_registry.py` discovered maps by regexing `say KTP <map> Match Config Executed`
+out of each `ktp_*.cfg`. That line is chat text nothing consumes, and on the custom pool it
+names a different map than the config serves — `ktp_saints.cfg` announces `dod_saints` while
+serving `dod_saints2_b3e`. Five of the nine maps the fleet actually plays were invisible to
+every count this script produced, and a bogus map name was indistinguishable from a real one.
+
+Discovery now reads `config/local/ktp_maps.ini`, the map-to-config binding table
+KTPMatchHandler itself parses in `load_map_mappings()`. The ini parse mirrors the plugin's,
+including the `.bsp` strip, the lowercase, and a section staying open until a `config` key
+closes it.
+
+- `registry.json` carried two override keys that are not maps — `dod_lennon_test` and
+  `dod_saints`. They are now `dod_lennon5_b1` and `dod_saints2_b3e`, and the topology claims
+  filed under the old names are dropped rather than carried across, because they were written
+  about names no BSP carries. The review queue is reordered by measured play, which puts
+  `dod_armory_b6` on it for the first time.
+- Three things that were silently dropped are now reported, without failing validation:
+  bindings whose config file is missing (`exec_map_config` execs a path that does not exist and
+  nothing reports it), configs no map is bound to, and configs whose `say` line names a map they
+  do not serve.
+- `--maps-ini` selects the binding file. The registry payload is `schema_version` 2.
+### `scripts`: capture authorization is per stream, not per match (2026-09-14)
+
+Operator ruling 2026-09-14. `evaluate_capture_authorization` marked a match
+unauthorized on any non-zero drop, reject, correlation failure, sequence gap or
+duplicate in any half, across all eleven streams together, and `build_report`
+gated `objective_attempts` and `grenade_entities` on that one verdict. A frag
+correlation failure therefore withheld the objective stream, whose own counters
+reconciled exactly — and it withheld it silently.
+
+Measured on the nine official S10 matches that have reports: one authorized
+under the old gate; eight now authorize at least one stream that previously
+published nothing. `objective_attempts` appears on six of them and
+`grenade_entities` on five.
+
+- **Unit of authorization: one stream, across every observed half.** Consumers
+  query a stream for the whole match, so a per-half verdict would publish half 1
+  and drop half 2 as an aggregate with nothing marking it partial.
+- **Still per-match, still fails everything:** the manifest contract (schema 22+,
+  the 2.00s cadence, the declared capabilities, activation receipt latency), the
+  manifest and health half sets against the observed halves, and an unknown
+  health type — a producer/daemon disagreement is not attributable to a stream.
+- **`sequence_gap_count` and `duplicate_or_reordered_count` are HALF-scoped, not
+  per-stream.** The daemon reads both from the per-half sequence state and
+  stamps the same value into every event type's row, while
+  `daemon_received`/`daemon_rejected`/`correlation_failure_count` are indexed by
+  event type. Measured across 328 live halves: both are identical across all
+  eleven streams in every half, and a sequence gap is non-zero on 133 halves
+  where the stream emitted nothing. A sequence gap is UDP intake loss, and the
+  daemon's own measurement is that it equals the sum of per-stream
+  `emitted - daemon_received` — so it is charged to the stream that lost the
+  line, and only a residual no stream accounts for fails the match. Charging the
+  half total to all eleven would have left them coupled.
+- **No loss tolerance.** One dropped, rejected or correlation-failed line still
+  fails its own stream. What changed is only that it stops failing the others.
+  Match-level `status`/`authorized` keep their old meaning exactly — every
+  precondition holds and every stream reconciles — so consumers that read them
+  are unaffected. The report DTO is unchanged (`analytics-report-dto-v1.2.0`,
+  report schema 11); neither field crosses into it.
+- **A withheld stream is visible with its reason.** `telemetry_lifecycles` now
+  carries `status: withheld` with `stream` and `withheld_reason`, and the
+  markdown renders the reason in place of the counts. Silent absence was the
+  defect.
+- New in the authorization result: `stream_authorization`, `authorized_streams`
+  and `match_errors`; `errors` still carries every error. New helpers
+  `capture_stream_status` / `capture_stream_authorized`. The result is embedded
+  whole in the report JSON, so those keys do appear there — the artifact grows
+  even though the validated DTO does not.
+- Position provenance now rides on the `position` stream alone, and
+  `match_readiness`'s objective and grenade lifecycle checks on theirs.
+  `METRIC_REQUIREMENTS` drops `schema22_capture_authorization` from
+  `positional_impact` and `objective_control`: their per-stream checks already
+  fail on every match-level precondition, so keeping both would have left
+  eligibility coupled while the checks beside it said otherwise. A new
+  `position_capture_authorization` check carries `positional_impact` — dropping
+  the match-level one alone would have loosened it, because
+  `schema23_position_provenance` only reaches FAIL once a manifest declares
+  schema 23, so a schema-22 archive with broken position capture would have
+  graded WARN and stayed partially eligible.
+- `lane_b_match_report`'s schema22 profile gate stays **match-level on purpose**
+  and now says so: the profile declares it needs an authorized capture, and
+  `prepare_lane_b_pages` hard-requires the `available` lifecycle shape, so
+  splitting it per stream means teaching that validator the withheld shape in
+  the same change.
+- A half carrying a repeated or unknown health type credits no intake shortfall
+  against its sequence gaps — a duplicated row would otherwise double-count one
+  stream's loss and absorb a residual that belongs to nobody.
+- krod's runbook step 3b ("lost and gaps 0 or close to it = OK") contradicts
+  this: there is no "close to it". Flagged for him, not edited.
+
 ### `scripts`: `deploy-restart-script.py` refuses to ship a canonical that drifted from the tracked `.example` (2026-09-14)
 
 The canonical `scripts/ktp-scheduled-restart.sh` is gitignored and untracked, so

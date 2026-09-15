@@ -48,6 +48,9 @@ local `.sql` or `.sql.gz` match fixture without starting MySQL or contacting a
 shared service. `build_anzio_spatial_atlas.ps1` turns one or more Anzio fixtures
 into the supported heatmap/report image set. Map geometry and analytical
 windows live in `config/analytics/spatial_maps/dod_anzio.json`.
+`spatial_map_geometry.py` turns a map's `overview` block into the
+world-to-overview projection pair the match report draws with; it refuses a
+`ROTATED 1` overview rather than guess the axis swap.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
@@ -66,8 +69,9 @@ source/sample labels. Official score input is accepted only as the paired
 `objective-score-timeline.json` plus private release produced by the projector;
 the bundle validates the match/map/facts digest binding and strips it before
 publication. A bare sanitized score DTO is deliberately rejected.
-`spatial_map_registry.py` discovers all KTP match configs
-and produces the map readiness matrix; it does not infer geometry or waypoints.
+`spatial_map_registry.py` inventories KTP match maps from the `ktp_maps.ini`
+bindings the server reads and produces the map readiness matrix; it does not
+infer geometry or waypoints, and it does not read a config's `say` line.
 
 `match_fixture_storage.py` measures SQL archive/transfer size and match-tagged
 payload without mislabeling that value as InnoDB allocation or a human-match
