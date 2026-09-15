@@ -73,6 +73,85 @@ published nothing. `objective_attempts` appears on six of them and
 - krod's runbook step 3b ("lost and gaps 0 or close to it = OK") contradicts
   this: there is no "close to it". Flagged for him, not edited.
 
+### `scripts`: the fleet audit redacts by shape before anything is published (2026-09-14)
+
+`.github/workflows/fleet-audit.yml` posts the drift report to a GitHub issue and
+uploads it as a run artifact. This repository is public, so both are
+world-readable, and `fleet-drift-snapshot.sh` captures root's crontab and
+`/etc/rc.local` **verbatim**. A credential ever written into a cron line would
+publish itself on the first run, and a published artifact cannot be unpublished.
+It has published once already. The first scheduled run, `34864628747` on
+2026-09-14, uploaded `audit-report.md` and `audit-stdout.txt` unredacted to a
+world-readable run artifact — `upload-artifact` is `if: always()`, so it ran even
+though the job had already failed. That artifact has since been deleted. The
+next scheduled run is 2026-09-21 09:00 UTC, which is the deadline this is
+written against.
+
+- New `scripts/audit_redact.py`. It redacts by SHAPE, never against a list of
+  today's credentials: a denylist goes stale at the next rotation, and it goes
+  stale in the direction that leaks. Nothing survives a redacted line that is
+  the userinfo half of a URL, the right-hand side of an assignment whose NAME
+  names a credential, the right-hand side of any shell env assignment inside
+  root's crontab, or an opaque token (≥20 chars of `[A-Za-z0-9+=_-]` mixing
+  upper, lower and digits, or ≥32 hex). A `$VAR` reference is kept: it is not a
+  value, and whether a host inlines a credential is the drift worth seeing.
+- It runs in `snapshot_payload()`, where the fleet's text enters the process —
+  not on the report. The report is one of four things built from that text
+  (report, Discord delta, state file, CI artifact), and redacting the report
+  alone would still upload the value.
+- The value half of every fact the `provision/expected-*.conf` sections compare
+  is untouched: GRUB flags, sysctl values, 16-char binary md5 prefixes, LinuxGSM
+  monitor states, and the `/etc/rc.local` lines the `expected-rc-local.conf`
+  globs match. A redaction that ate those would turn the report green by
+  blinding it. Measured read-only against three live hosts: one line changed per
+  host (the root filesystem UUID, already ignored by rule), 15/15 rc.local globs
+  and 6/6 cmdline flags still matching.
+- Fleet addresses leave the report: the roster prints name and group only, and
+  connection errors go through `redact_diagnostic()` in both
+  `audit-fleet-drift.py` and `ktp-restart-drift.py`.
+- This also narrows `/var/log/ktp-audit-*.md` on the data server, which the
+  weekly cron writes `0644`.
+- The redaction changes no workflow behaviour; the `set +e` fix below is the
+  only workflow change here, and it is control flow, not policy. The
+  `fleet-audit` label now exists. `CLAUDE_CODE_OAUTH_TOKEN` does not, and is the
+  remaining gate — without it `triage` fails, though `collect` still runs and
+  still uploads, which is why the redaction cannot wait on the token.
+
+### `.github`: the fleet audit's `collect` job survives its own drift exit (2026-09-14)
+
+Run `34864628747` — the workflow's first scheduled fire, ~6h50m late off the
+09:00 UTC cron, which is GitHub queueing and not a dropped schedule — failed with
+`Process completed with exit code 2`. The audit itself was fine: 5/5 hosts
+reached, a normal drift result. The step was.
+
+GitHub runs every `run:` under `shell: /usr/bin/bash -e {0}`, so errexit is on
+before the script's first line. `set -uo pipefail` **adds** to that; omitting
+`-e` does not clear it. The audit's normal drift exit `2` came back through
+`pipefail`, and bash killed the step before `rc="${PIPESTATUS[0]}"` was ever
+assigned — so the `case` never ran, `Audit found drift.` never printed, and the
+gate, the triage and the Discord notice were all skipped.
+
+- `set +e` in `Fleet drift audit`, so a drift exit reaches the `case`. Exit `1`
+  stays fatal: a broken audit is not drift.
+- Same clear in `Restart-script drift`, which carried the identical shape. No
+  outcome changes there — its pipeline is the last command, so `pipefail` hands
+  the step the same status either way and `steps.restart_drift.outcome` reads the
+  same. Cleared for the shape, so the next line appended there does not vanish.
+  `test_the_pre_fix_restart_step_reproduces_nothing` records that honestly.
+- The step's comment named this trap while sitting inside it. It now says that
+  errexit arrives already on, and names the run.
+- The three `set -euo pipefail` steps are deliberate and untouched.
+- New `tests/unit/test_fleet_audit_collect_step.py`, 11 tests. It extracts the
+  scripts from the workflow file itself and executes them under `bash -e` with
+  `python3` stubbed, so no copy of the step can drift from the shipped one.
+  `test_no_step_enables_pipefail_without_clearing_errexit` states the property
+  over *every* `run:` step, so a step added later carrying the shape fails here
+  rather than on a Monday. The bug is the non-zero path, so
+  `test_the_pre_fix_step_still_reproduces_the_failure` strips `set +e` and
+  asserts the failure returns — against the pre-fix file the suite goes 6 failed
+  / 5 passed, and the 5 that pass are the probe controls plus the `rc=0` happy
+  path, which passed while the workflow was broken.
+
 ### `scripts`: the public demo archive is searchable by player (2026-09-14)
 
 `ktp-fastdl-indexes.py` writes `/demos/players.html`: search by name, `STEAM_0:`/`STEAM_1:`,
