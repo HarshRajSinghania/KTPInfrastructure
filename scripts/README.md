@@ -456,6 +456,17 @@ python3 precache_audit.py --scope all --cron-mode --output /var/log/ktp-precache
 
 **Phase 3 deferred** — SHA256 drift detection (presence-only today). Add only if a real drift incident shows up; deploys are pretty atomic via FTP fan-out.
 
+### assemble_changelog.py
+Folds the per-change fragments in `changelog.d/` into a numbered `CHANGELOG.md` section. Runs on `main` at release time, and is the only thing that writes that file — a PR adds its own fragment instead, so two PRs never touch the same line. `changelog.d/README.md` is the contributor-facing convention.
+
+```bash
+python scripts/assemble_changelog.py preview                  # render the unreleased section
+python scripts/assemble_changelog.py check                    # validate fragments + the stub (Tier 1 runs this)
+python scripts/assemble_changelog.py release --version 1.6.0  # fold, then delete the fragments
+```
+
+Output is ordered by filename and normalised to LF, so the same fragments always produce the same bytes and a regeneration is never a spurious diff.
+
 ## Deployment Locations
 
 | Script | Server | Path |

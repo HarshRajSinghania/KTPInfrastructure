@@ -258,10 +258,30 @@ Prefixes in use include the directory or subsystem (`lan-web:`, `wsdod:`, `hltv:
 - If you used an AI assistant, omit attribution trailers. House practice on public repos is no
   `Co-Authored-By` for tooling and no session links.
 - Anything a future operator would need to know — why a threshold is what it is, what a change
-  was verified against, what it deliberately does not do — goes in [CHANGELOG.md](CHANGELOG.md)
-  under `## [Unreleased]`, as a dated, area-prefixed entry. The existing entries are the format
-  guide. Skip it for pure refactors; do not skip it for behaviour changes to anything the fleet
-  runs.
+  was verified against, what it deliberately does not do — goes in a CHANGELOG entry, as a dated,
+  area-prefixed entry. The existing entries in [CHANGELOG.md](CHANGELOG.md) are the format guide.
+  Skip it for pure refactors; do not skip it for behaviour changes to anything the fleet runs.
+
+### Where the entry goes: `changelog.d/`, not CHANGELOG.md
+
+Add **your own file**, `changelog.d/YYYY-MM-DD-<slug>.md`, holding exactly what you would have
+written under `## [Unreleased]`. Take the slug from your branch name — a branch name is unique per
+PR, so no two PRs can land on the same path.
+
+Do not write under `## [Unreleased]`. That heading is a pointer stub now, and the Tier 1 suite
+fails if anything appears beneath it. Every PR used to append there at the same offset, so merging
+one conflicted every sibling on that file and on nothing else; six open PRs were hand-resolved on
+2026-09-14 and the cascade re-broke them one at a time as each merge landed.
+
+```bash
+python scripts/assemble_changelog.py preview   # what the next release will say
+python scripts/assemble_changelog.py check     # what CI runs
+```
+
+Fragments are folded into a numbered release section by
+`python scripts/assemble_changelog.py release --version X.Y.Z`, run on `main` at release time —
+which is the only thing that writes CHANGELOG.md. Full convention:
+[changelog.d/README.md](changelog.d/README.md).
 
 ---
 
