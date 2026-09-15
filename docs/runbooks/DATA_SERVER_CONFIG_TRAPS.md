@@ -131,3 +131,32 @@ du -shL /var/www/fastdl/demos    # -L follows the link
 
 Prefer the real path when you have it. Any disk figure taken without one of
 these is worth re-deriving before it goes in a report.
+
+## A map's texture WADs are NOT under `maps/`, and one 404 there is correct
+
+The engine prepends `dod/` to every download request and asks for a map's texture wads at
+`/dod/<name>.wad` — **one level above `maps/`**. So `fastdl.ktpdod.com/dod/maps/` carries `.bsp`,
+`.res` and `.txt` and **zero** `.wad`, which reads to a human browsing for one as "they aren't
+hosted" while the client is fetching them without trouble.
+
+⛔ **Do not copy wads into `/var/www/fastdl/dod/maps/`.** No client ever requests that path, so a
+copy there is dead weight that also has to be kept in sync. The fix is to list them where they
+are; `scripts/ktp-fastdl-indexes.py` renders the `/dod/` page's wads as their own linked section
+and points `maps/` at it.
+
+⛔ **`halflife.wad` 404s and that is correct.** 28 of the 78 maps on FastDL name it in their
+worldspawn `wad` key, and it ships with the base game — every client already owns it. A sweep that
+treats every unresolved wad reference as a gap reports it as the biggest one.
+
+⚠️ **A BSP wad reference is not proof a texture is missing.** Textures can be embedded in the BSP's
+own texture lump, so a map can name a wad nobody hosts and still render correctly. Measured
+2026-09-15: 78 `.bsp`, 14 with no `wad` key at all, 80 distinct wads referenced, 70 on disk; **39
+distinct wads unresolved, of which `halflife.wad` is one.** The other 38 span eight maps
+(`dod_harrington`, `dod_saints_b1`, `dod_heutau`, `dod_dog1`, `dod_schwetz`, `dod_thunder`,
+`dod_ramelle`, `para_glider`) and are absent from `/home/dod/distribute/` too, so they are not a
+publish gap. Only `dod_harrington` is in the live mapcycle. Controls on that probe: `dod_anzio.wad`
+present in both trees, `zzzNOPE.wad` in neither.
+
+⚠️ **`.res` files are a weaker surface than the BSP.** Only 46 of the 78 maps have one and only 31
+name a wad, so a `.res`-only sweep sees 35 distinct wads where the BSP `wad` key sees 80. Read the
+BSP entity lump; `scripts/precache_audit.py` already does.

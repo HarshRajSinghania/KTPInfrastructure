@@ -6,19 +6,24 @@ that matter into each `config/analytics/spatial_maps/<map>.json` under
 `overview`; this turns them into the 3x3 affine pair the website draws with.
 
 The scale is `zoom / 8` because one overview pixel is 8 world units at zoom
-1.0, and the map origin lands on the image centre. Both axes are negated and
-swapped, which is why the matrices look transposed:
+1.0, and the map origin lands on the image centre. ROTATED picks which world
+axis spends the image's 1024-px axis:
 
-    px = width / 2  - s * (world_y - origin_y)
-    py = height / 2 - s * (world_x - origin_x)
+    ROTATED 0                              ROTATED 1
+    px = width/2  - s*(world_y - origin_y) px = width/2  + s*(world_x - origin_x)
+    py = height/2 - s*(world_x - origin_x) py = height/2 - s*(world_y - origin_y)
 
 Matrices are row-major and unrounded. They are a derivation, not a
 measurement -- rounding them moves every point that is drawn through them.
 
-ROTATED 1 is refused. The convention for it is untested against any real map,
-and a wrong axis swap does not look wrong: it renders a confident picture of
-the wrong place. `dod_saints2_b3e` is the one map in the current pool that
-needs it.
+ROTATED 1 was refused here until 2026-09-15 as untested. It is now read off
+`CHudSpectator::DrawOverviewLayer` in the HLSDK, whose `if (rotated)` branch
+walks its quad grid along world X with a positive step where the other walks
+world Y with a negative one, and confirmed against the fleet's own overviews:
+`extent_x > extent_y` reproduces the shipped flag on 67 of 67 maps, and
+silhouette overlap against the shipped BMPs picks this convention over the
+seven alternatives on every map whose footprint leaves enough background to
+tell them apart. `scripts/make_overview_descriptor.py` carries the derivation.
 """
 from __future__ import annotations
 
@@ -41,11 +46,6 @@ def _facts(map_name: str, overview: dict[str, Any]) -> dict[str, Any]:
                if overview.get(key) is None]
     if missing:
         raise UnsupportedOverview(f"{map_name}: overview is missing {', '.join(missing)}")
-    if bool(overview.get("rotated")):
-        raise UnsupportedOverview(
-            f"{map_name}: ROTATED 1 overviews have no verified projection; "
-            "refusing rather than guessing the axis swap"
-        )
     zoom = float(overview["zoom"])
     if zoom <= 0:
         raise UnsupportedOverview(f"{map_name}: overview zoom must be positive, got {zoom}")
@@ -58,7 +58,7 @@ def _facts(map_name: str, overview: dict[str, Any]) -> dict[str, Any]:
         "zoom": zoom,
         "origin_x": float(overview["origin_x"]),
         "origin_y": float(overview["origin_y"]),
-        "rotated": False,
+        "rotated": bool(overview.get("rotated")),
         "width": width,
         "height": height,
     }
@@ -81,18 +81,31 @@ def overview_matrices(map_name: str, overview: dict[str, Any]) -> dict[str, Any]
     facts = _facts(map_name, overview)
     scale = facts["zoom"] / WORLD_UNITS_PER_PIXEL
     half_width, half_height = facts["width"] / 2.0, facts["height"] / 2.0
-
-    world_to_pixel = [
-        [0.0, -scale, half_width + scale * facts["origin_y"]],
-        [-scale, 0.0, half_height + scale * facts["origin_x"]],
-        [0.0, 0.0, 1.0],
-    ]
     inverse = 1.0 / scale
-    pixel_to_world = [
-        [0.0, -inverse, half_height * inverse + facts["origin_x"]],
-        [-inverse, 0.0, half_width * inverse + facts["origin_y"]],
-        [0.0, 0.0, 1.0],
-    ]
+
+    if facts["rotated"]:
+        # World X runs along the image's wide axis, left to right.
+        world_to_pixel = [
+            [scale, 0.0, half_width - scale * facts["origin_x"]],
+            [0.0, -scale, half_height + scale * facts["origin_y"]],
+            [0.0, 0.0, 1.0],
+        ]
+        pixel_to_world = [
+            [inverse, 0.0, facts["origin_x"] - half_width * inverse],
+            [0.0, -inverse, half_height * inverse + facts["origin_y"]],
+            [0.0, 0.0, 1.0],
+        ]
+    else:
+        world_to_pixel = [
+            [0.0, -scale, half_width + scale * facts["origin_y"]],
+            [-scale, 0.0, half_height + scale * facts["origin_x"]],
+            [0.0, 0.0, 1.0],
+        ]
+        pixel_to_world = [
+            [0.0, -inverse, half_height * inverse + facts["origin_x"]],
+            [-inverse, 0.0, half_width * inverse + facts["origin_y"]],
+            [0.0, 0.0, 1.0],
+        ]
     return {
         "map_name": map_name,
         "scheme": SCHEME,

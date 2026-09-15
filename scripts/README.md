@@ -49,12 +49,16 @@ shared service. `build_anzio_spatial_atlas.ps1` turns one or more Anzio fixtures
 into the supported heatmap/report image set. Map geometry and analytical
 windows live in `config/analytics/spatial_maps/dod_anzio.json`.
 `spatial_map_geometry.py` turns a map's `overview` block into the
-world-to-overview projection pair the match report draws with; it refuses a
-`ROTATED 1` overview rather than guess the axis swap.
-`render_overview_bmp.py` makes the overview BMP itself from a map's BSP: the
-1024x768 8-bit file keyed on palette colour RGB(0,255,0), drawn with that same
-projection (and the ROTATED 1 branch, verified against `dod_thunder`), with
-ZOOM/ORIGIN derived from `models[0]` bounds unless `--descriptor` supplies them.
+world-to-overview projection pair the match report draws with, for both
+`ROTATED` conventions. `make_overview_descriptor.py` runs that projection
+backwards: give it a `.bsp` and it solves the `overviews/<map>.txt` descriptor
+-- `ZOOM`, `ORIGIN`, `ROTATED` and layer `HEIGHT` -- from the map's own bounds,
+which `bsp_bounds.py` reads out of lumps 0, 10 and 14. Pass `--json` for the
+bounds box, so whatever renders the matching `.bmp` frames the same one.
+`render_overview_bmp.py` makes that `.bmp` from the same BSP: a 1024x768 8-bit
+file keyed on palette colour RGB(0,255,0), drawn with the same projection (the
+`ROTATED 1` branch verified against `dod_thunder`), with ZOOM/ORIGIN derived
+from `models[0]` bounds unless `--descriptor` supplies them.
 
 For checksum-pinned multi-map handovers, `analyze_competitive_corpus.py`
 restores every listed fixture into a separate ephemeral database and keeps
@@ -462,6 +466,36 @@ python3 precache_audit.py --scope all --cron-mode --output /var/log/ktp-precache
 **Deployed to:** `/usr/local/bin/ktp-precache-audit` (data server symlink to the script).
 
 **Phase 3 deferred** — SHA256 drift detection (presence-only today). Add only if a real drift incident shows up; deploys are pretty atomic via FTP fan-out.
+
+### build_map_bundle.py / build_resgen.sh
+One entry point from "a new `.bsp` landed" to the four files a client needs:
+`maps/<map>.bsp`, `maps/<map>.res`, `overviews/<map>.txt`, `overviews/<map>.bmp`,
+plus a `MANIFEST.json` of md5s for the post-deploy sweep. It writes to a staging
+directory and touches no server — `docs/MAP_DEPLOY.md` is the operator half.
+
+```bash
+scripts/build_resgen.sh                      # clone + build RESGen at the pinned 2.0.3 tag
+export KTP_RESGEN=~/.cache/ktp/resgen/bin/resgen
+
+python scripts/build_map_bundle.py dod_newmap_b1.bsp \
+    --out ~/staging/maps \
+    --compare-against <dir with the predecessor's .res> --predecessor dod_newmap_a9
+```
+
+RESGen is GPL-2.0 third-party code (`kriswema/resgen`) and is deliberately not
+vendored; `build_resgen.sh` fetches and builds it into a scratch directory.
+
+Two things worth knowing before running it. RESGen lists the overview pair **only
+if both files already exist** next to the map, so the overview has to be rendered
+first — the tool enforces that order and fails the bundle otherwise. And it writes
+CRLF, matching every `.res` already on the fleet.
+
+`--compare-against` prints the entry-list delta against the predecessor map
+alongside the BSP's worldspawn `wad` and `skyname` keys, so a WAD that appeared or
+vanished can be checked against the map rather than accepted.
+
+The validation behind the pinned tag — 44 fleet maps replayed, what reproduced and
+what did not — is in `docs/MAP_DEPLOY.md`.
 
 ### assemble_changelog.py
 Folds the per-change fragments in `changelog.d/` into a numbered `CHANGELOG.md` section. Runs on `main` at release time, and is the only thing that writes that file — a PR adds its own fragment instead, so two PRs never touch the same line. `changelog.d/README.md` is the contributor-facing convention.
