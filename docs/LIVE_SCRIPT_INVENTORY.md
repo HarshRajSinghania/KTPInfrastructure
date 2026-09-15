@@ -4,6 +4,12 @@ A snapshot, not a record: it was measured once, read-only, and goes stale the ne
 installed. `docs/DEPLOY_MANIFEST.md` is how installs get recorded from now on; this is the baseline that
 existed before the manifest did.
 
+**Update 2026-09-13.** The files marked UNTRACKED on 2026-09-11 are now in this repo, byte-identical to the
+installed copies (re-hashed read-only that day), so their rows below read MATCH. `/etc/rc.local` on Atlanta and
+Dallas was missing from the first pass; it is added below. Those two hosts start it through the distro unit
+`/usr/lib/systemd/system/rc-local.service`, while Denver, New York and Chicago have an `/etc/systemd/system`
+copy written by `provision-gameserver.sh`. None of these files is in a deploy manifest yet.
+
 **Method.** On each host, every file reachable from a systemd unit's `Exec*=`, a cron entry, `/usr/local/{bin,sbin}`,
 `dodserver`'s crontab or a running app's `/opt/<app>` tree was hashed. Each md5 was then looked up against every
 historical blob of every same-named file in every KTP repo, and, where names differ, by git blob id. Controls on every
@@ -24,13 +30,13 @@ left in `/usr/local/bin`, and distro files are excluded.
 
 ## Data server
 
-DRIFT 1, UNTRACKED 2, TEMPLATED 2, EXTERNAL 5, MATCH 114.
+DRIFT 1, TEMPLATED 2, EXTERNAL 5, MATCH 116.
 
 | path | md5 | verdict | source | note |
 |---|---|---|---|---|
 | `/usr/local/bin/ktp-fleet-audit.sh` | `d06bfaa2` | DRIFT | `KTPInfrastructure:scripts/ktp-fleet-audit.sh` | equals scripts/ktp-fleet-audit.sh@f219354d once one em-dash double-encoded (cp1252) in transit is undone; comment-only |
-| `/opt/ktp-tier2-runner/curl_smoke.py` | `1e6564a0` | UNTRACKED | — |  |
-| `/usr/local/bin/ktp-identity-reconcile-fetch.sh` | `ad9a5f53` | UNTRACKED | — | its unit files are versioned in a private repo; the script itself is in no repo |
+| `/opt/ktp-tier2-runner/curl_smoke.py` | `1e6564a0` | MATCH | `KTPInfrastructure:scripts/curl_smoke.py` @ `8d8fdccf21` | full md5 `1e6564a0b43ce9c79f1d9eb0b5a31a28`; root 644; imports `tests.smoke.rcon` from the runner's `_work` checkout |
+| `/usr/local/bin/ktp-identity-reconcile-fetch.sh` | `ad9a5f53` | MATCH | `KTPInfrastructure:scripts/ktp-identity-reconcile-fetch.sh` @ `8d8fdccf21` | full md5 `ad9a5f53f2d134aad40448ec7735e70c`; root 750; its unit files are versioned in a private repo; reads `GH_TOKEN` from the unit's EnvironmentFile |
 | `/home/hltvserver/hltv-api.py` | `ae54529b` | TEMPLATED | `KTPInfrastructure:scripts/hltv-api.py.example` @ `fd9dd147e9` |  |
 | `/opt/ktp-backup.sh` | `d99c6e9e` | TEMPLATED | `KTPInfrastructure:scripts/ktp-backup.sh.example` @ `aabb405c6b` |  |
 | `/opt/hlstatsx/scripts/hlstats-awards.pl` | `c2c1f750` | EXTERNAL | — | upstream HLstatsX:CE, not carried in KTPHLStatsX |
@@ -127,11 +133,12 @@ Plus 35 live files from private repos, each matching a commit in its repo.
 
 ## Atlanta
 
-UNTRACKED 1, GENERATED 1, TEMPLATED 1, MATCH 2, THIRD-PARTY 10.
+GENERATED 1, TEMPLATED 1, MATCH 4, THIRD-PARTY 10.
 
 | path | md5 | verdict | source | note |
 |---|---|---|---|---|
-| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | UNTRACKED | — |  |
+| `/etc/rc.local` | `f7fe55f8` | MATCH | `KTPInfrastructure:ops/rc-local/atlanta/rc.local` @ `8d8fdccf21` | full md5 `f7fe55f8d489986412233664af6cf3f7`; root 755; same bytes as New York; missed on 2026-09-11, see the update note |
+| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | MATCH | `KTPInfrastructure:scripts/ktp-kernel-update.sh` @ `8d8fdccf21` | full md5 `c313dd98ee87208642d16d412f1d94f5`, same on all five hosts; root 700; one-shot, last ran 2026-08-25, nothing schedules it now |
 | `/usr/local/bin/ktp-apply-chrt.sh` | `d4ffb423` | GENERATED | `KTPInfrastructure:scripts/deploy-chrt-service.sh` | written by an unquoted heredoc in deploy-chrt-service.sh with the host's CPU map expanded in |
 | `/home/dodserver/ktp-scheduled-restart.sh` | `4c5297d2` | TEMPLATED | `KTPInfrastructure:scripts/ktp-scheduled-restart.sh.example` @ `582ead5608` |  |
 
@@ -146,11 +153,12 @@ LinuxGSM: 10 files (the per-instance launchers and `lgsm/modules/command_monitor
 
 ## Dallas
 
-UNTRACKED 1, GENERATED 1, TEMPLATED 1, MATCH 2, THIRD-PARTY 10.
+GENERATED 1, TEMPLATED 1, MATCH 4, THIRD-PARTY 10.
 
 | path | md5 | verdict | source | note |
 |---|---|---|---|---|
-| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | UNTRACKED | — |  |
+| `/etc/rc.local` | `f7fe55f8` | MATCH | `KTPInfrastructure:ops/rc-local/dallas/rc.local` @ `8d8fdccf21` | full md5 `f7fe55f8d489986412233664af6cf3f7`; root 755; same bytes as New York; missed on 2026-09-11, see the update note |
+| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | MATCH | `KTPInfrastructure:scripts/ktp-kernel-update.sh` @ `8d8fdccf21` | full md5 `c313dd98ee87208642d16d412f1d94f5`, same on all five hosts; root 700; one-shot, last ran 2026-08-25, nothing schedules it now |
 | `/usr/local/bin/ktp-apply-chrt.sh` | `d4ffb423` | GENERATED | `KTPInfrastructure:scripts/deploy-chrt-service.sh` | written by an unquoted heredoc in deploy-chrt-service.sh with the host's CPU map expanded in |
 | `/home/dodserver/ktp-scheduled-restart.sh` | `4c5297d2` | TEMPLATED | `KTPInfrastructure:scripts/ktp-scheduled-restart.sh.example` @ `582ead5608` |  |
 
@@ -165,12 +173,12 @@ LinuxGSM: 10 files (the per-instance launchers and `lgsm/modules/command_monitor
 
 ## Denver
 
-UNTRACKED 2, GENERATED 1, TEMPLATED 1, MATCH 2, THIRD-PARTY 10.
+GENERATED 1, TEMPLATED 1, MATCH 4, THIRD-PARTY 10.
 
 | path | md5 | verdict | source | note |
 |---|---|---|---|---|
-| `/etc/rc.local` | `5384a5b8` | UNTRACKED | — |  |
-| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | UNTRACKED | — |  |
+| `/etc/rc.local` | `5384a5b8` | MATCH | `KTPInfrastructure:ops/rc-local/denver/rc.local` @ `8d8fdccf21` | full md5 `5384a5b81c13cc79feb957b3a7a70069`; root 755; differs from Atlanta/Dallas/New York only in the NIC name (`enp2s0f0`) |
+| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | MATCH | `KTPInfrastructure:scripts/ktp-kernel-update.sh` @ `8d8fdccf21` | full md5 `c313dd98ee87208642d16d412f1d94f5`, same on all five hosts; root 700; one-shot, last ran 2026-08-25, nothing schedules it now |
 | `/usr/local/bin/ktp-apply-chrt.sh` | `d4ffb423` | GENERATED | `KTPInfrastructure:scripts/deploy-chrt-service.sh` | written by an unquoted heredoc in deploy-chrt-service.sh with the host's CPU map expanded in |
 | `/home/dodserver/ktp-scheduled-restart.sh` | `4c5297d2` | TEMPLATED | `KTPInfrastructure:scripts/ktp-scheduled-restart.sh.example` @ `582ead5608` |  |
 
@@ -185,12 +193,12 @@ LinuxGSM: 10 files (the per-instance launchers and `lgsm/modules/command_monitor
 
 ## New York
 
-UNTRACKED 2, GENERATED 1, TEMPLATED 1, MATCH 2, THIRD-PARTY 10.
+GENERATED 1, TEMPLATED 1, MATCH 4, THIRD-PARTY 10.
 
 | path | md5 | verdict | source | note |
 |---|---|---|---|---|
-| `/etc/rc.local` | `f7fe55f8` | UNTRACKED | — |  |
-| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | UNTRACKED | — |  |
+| `/etc/rc.local` | `f7fe55f8` | MATCH | `KTPInfrastructure:ops/rc-local/newyork/rc.local` @ `8d8fdccf21` | full md5 `f7fe55f8d489986412233664af6cf3f7`; root 755; same bytes as Atlanta and Dallas |
+| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | MATCH | `KTPInfrastructure:scripts/ktp-kernel-update.sh` @ `8d8fdccf21` | full md5 `c313dd98ee87208642d16d412f1d94f5`, same on all five hosts; root 700; one-shot, last ran 2026-08-25, nothing schedules it now |
 | `/usr/local/bin/ktp-apply-chrt.sh` | `d4ffb423` | GENERATED | `KTPInfrastructure:scripts/deploy-chrt-service.sh` | written by an unquoted heredoc in deploy-chrt-service.sh with the host's CPU map expanded in |
 | `/home/dodserver/ktp-scheduled-restart.sh` | `4c5297d2` | TEMPLATED | `KTPInfrastructure:scripts/ktp-scheduled-restart.sh.example` @ `582ead5608` |  |
 
@@ -205,12 +213,12 @@ LinuxGSM: 10 files (the per-instance launchers and `lgsm/modules/command_monitor
 
 ## Chicago
 
-UNTRACKED 2, GENERATED 1, TEMPLATED 1, MATCH 2, THIRD-PARTY 8.
+GENERATED 1, TEMPLATED 1, MATCH 4, THIRD-PARTY 8.
 
 | path | md5 | verdict | source | note |
 |---|---|---|---|---|
-| `/etc/rc.local` | `73286230` | UNTRACKED | — |  |
-| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | UNTRACKED | — |  |
+| `/etc/rc.local` | `73286230` | MATCH | `KTPInfrastructure:ops/rc-local/chicago/rc.local` @ `8d8fdccf21` | full md5 `73286230706f9107f6ce1017005532c5`; root 755; the older `provision-gameserver.sh` layout plus appended `eth0` lines; no IRQ affinity block |
+| `/usr/local/sbin/ktp-kernel-update.sh` | `c313dd98` | MATCH | `KTPInfrastructure:scripts/ktp-kernel-update.sh` @ `8d8fdccf21` | full md5 `c313dd98ee87208642d16d412f1d94f5`, same on all five hosts; root 700; one-shot, last ran 2026-08-25, nothing schedules it now |
 | `/usr/local/bin/ktp-apply-chrt.sh` | `2352211a` | GENERATED | `KTPInfrastructure:scripts/deploy-chrt-service.sh` | written by an unquoted heredoc in deploy-chrt-service.sh with the host's CPU map expanded in |
 | `/home/dodserver/ktp-scheduled-restart.sh` | `4c5297d2` | TEMPLATED | `KTPInfrastructure:scripts/ktp-scheduled-restart.sh.example` @ `582ead5608` |  |
 
