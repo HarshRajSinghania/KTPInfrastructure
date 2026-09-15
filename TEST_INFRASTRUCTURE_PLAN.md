@@ -232,6 +232,20 @@ One non-negotiable rule: **author of code change owns test change**. No dedicate
 
 Test code gets same code-review standard as production code. No "it's just a test" escape hatch.
 
+**A check that is red on `main` itself is more urgent than a flake, and gets treated as a
+break, not as a known number.** A flake is noticed because it changes; a permanently-red
+assertion is the same failure in every run, so people learn the count ("the usual two") and
+stop reading the job — and the next real failure arrives inside that count and is read as
+normal. Lane B ran `2 failed, 537 passed` this way, both failures traceable to plain `main`:
+an assertion pinned to a literal list the workflow had stopped spelling, and a coverage flag
+a fixture could no longer satisfy. **Before blaming a branch for a red Lane B, reproduce the
+failure on `main` with no changes.** Two rules fall out of it:
+
+- **Assert the property, never a remembered spelling.** A test that counts occurrences of an
+  exact path in a workflow file dies at the next legitimate refactor and dies silently.
+- **Run the assertion where a merge can see it.** Six Lane B steps are lane-gated; a check
+  that only runs in the `full` lane is invisible to everything that fires on a merge.
+
 ### CI host decision
 
 **Locked: GitHub Actions hosted for Tier 1, self-hosted runner on data server for Tier 2.**

@@ -20,12 +20,20 @@
 #   WEBHOOK_URL=""         — Discord webhook. Empty = local-only monitoring.
 #   MENTION_USER_ID=""     — Discord user to @-mention. Empty = no ping.
 #   LOCATION=""            — override the hostname-derived location code.
+#   RESTART_STATE_DIR=""   — where ktp-scheduled-restart.sh keeps its cron
+#                            backup. Defaults to ${KTP_STATE_DIR:-$HOME/.ktp};
+#                            must match that script or the gate below suppresses
+#                            nothing.
+#   RESTART_GRACE_MINUTES=10 — how long a stripped monitor cron is treated as a
+#                            restart in flight rather than a fault.
 #
 # STATE (~/.ktp-fleet-health/state):
 #   CONSECUTIVE_BAD=N      — minutes consecutively below expected
 #   ALERT_STATE=healthy|unhealthy
 #   LAST_RUN=epoch
 #   LAST_RUNNING=N
+#   CRON_STATE=armed|incomplete
+#   LAST_MONITOR_CRONS=N
 #
 # CRON:
 #   * * * * * /home/dodserver/ktp-fleet-health.sh >/dev/null 2>&1
@@ -49,6 +57,8 @@ THRESHOLD_MINUTES=3
 WEBHOOK_URL=""             # empty = silent monitoring (no Discord posts)
 MENTION_USER_ID=""
 LOCATION=""
+RESTART_STATE_DIR=""       # auto-derives below if unset after config load
+RESTART_GRACE_MINUTES=10
 
 # Load configs (system first, then per-host)
 [ -r "$SYSTEM_CONFIG" ] && source "$SYSTEM_CONFIG"
@@ -56,6 +66,11 @@ LOCATION=""
 
 # Derive EXPECTED if config didn't set it explicitly.
 [ -z "$EXPECTED" ] && EXPECTED=$NUM_INSTANCES
+
+# Same default as ktp-scheduled-restart.sh's CRON_STATE_DIR; if that script is
+# pointed elsewhere, both need the override.
+[ -z "$RESTART_STATE_DIR" ] && RESTART_STATE_DIR=${KTP_STATE_DIR:-$HOME_DIR/.ktp}
+RESTART_CRON_BACKUP=$RESTART_STATE_DIR/monitor-cron.bak
 
 # Resolve LOCATION if config didn't override. Known KTP hosts map to short
 # codes for tidier alert titles; everything else falls back to hostname.
@@ -141,10 +156,10 @@ down_ports() {
 #
 # This script alerts when instances are DOWN. It cannot tell whether they will
 # come back: recovery rides on LinuxGSM's per-minute monitor cron, and the
-# nightly restart disables that cron and re-enables it ~90s later. If it ever
-# dies between the two the cron stays off, and a later reboot leaves the host
-# down with nothing to lift it -- silently, because an absent cron looks
-# exactly like a quiet one.
+# nightly restart strips that cron and puts it back at the end. If it ever dies
+# between the two the cron stays off, and a later reboot leaves the host down
+# with nothing to lift it -- silently, because an absent cron looks exactly like
+# a quiet one.
 #
 # grep -c prints "0" AND exits 1 when nothing matches -- the same trap the
 # pgrep comment above documents, and it bites hardest HERE because zero is the
@@ -159,13 +174,59 @@ MONITOR_CRONS=$(crontab -l 2>/dev/null | grep -c '^[^#]*monitor') || true
 [ -n "$MONITOR_CRONS" ] || MONITOR_CRONS=0
 CRON_STATE=${CRON_STATE:-armed}
 
-if [ "$MONITOR_CRONS" -lt "$EXPECTED" ] && [ "$CRON_STATE" = "armed" ]; then
-    send_alert "⚠️ ${LOCATION} monitor cron INCOMPLETE — ${MONITOR_CRONS}/${EXPECTED}" "Auto-restart is not armed for every instance. A reboot now would leave instances down with nothing to bring them back. Check: crontab -l | grep monitor" 16776960
-    CRON_STATE=incomplete
-elif [ "$MONITOR_CRONS" -ge "$EXPECTED" ] && [ "$CRON_STATE" = "incomplete" ]; then
-    send_alert "✅ ${LOCATION} monitor cron re-armed — ${MONITOR_CRONS}/${EXPECTED}" "Auto-restart is armed for every instance again." 3066993
-    CRON_STATE=armed
-fi
+# >>> ktp-monitor-cron-gate
+# ktp-scheduled-restart.sh strips these same lines on purpose and puts them back
+# a minute or so later, so a bare count fires on every host every night and
+# buries the one case worth a ping. That script keeps monitor-cron.bak on disk
+# for exactly the stripped window (written before the strip, removed by its EXIT
+# trap), so the sentinel answers what the count cannot: a FRESH one means
+# maintenance, a STALE one means the restart never re-armed.
+monitor_cron_gate() {
+    local count=$1 expected=$2 state=$3 sentinel=$4 grace_s=$5 now=$6
+    local mtime age
+    CRON_VERDICT=quiet
+    CRON_STATE=$state
+
+    if [ "$count" -ge "$expected" ]; then
+        if [ "$state" = "incomplete" ]; then
+            CRON_VERDICT=clear
+            CRON_STATE=armed
+        fi
+        return 0
+    fi
+
+    if [ -f "$sentinel" ]; then
+        # An unreadable sentinel yields mtime 0, so the age is enormous and the
+        # gate alerts. A guard that cannot read its own evidence must fire, never
+        # suppress; a backwards clock jump gives a negative age and does the same.
+        mtime=$(stat -c %Y "$sentinel" 2>/dev/null) || mtime=0
+        [ -n "$mtime" ] || mtime=0
+        age=$((now - mtime))
+        if [ "$age" -ge 0 ] && [ "$age" -lt "$grace_s" ]; then
+            CRON_VERDICT=suppressed
+            return 0
+        fi
+    fi
+
+    if [ "$state" = "armed" ]; then
+        CRON_VERDICT=warn
+        CRON_STATE=incomplete
+    fi
+    return 0
+}
+# <<< ktp-monitor-cron-gate
+
+monitor_cron_gate "$MONITOR_CRONS" "$EXPECTED" "$CRON_STATE" \
+    "$RESTART_CRON_BACKUP" "$((RESTART_GRACE_MINUTES * 60))" "$(date +%s)"
+
+case "$CRON_VERDICT" in
+    warn)
+        send_alert "⚠️ ${LOCATION} monitor cron INCOMPLETE — ${MONITOR_CRONS}/${EXPECTED}" "Auto-restart is not armed for every instance and no scheduled restart is in flight. A reboot now would leave instances down with nothing to bring them back. Check: crontab -l | grep monitor" 16776960
+        ;;
+    clear)
+        send_alert "✅ ${LOCATION} monitor cron re-armed — ${MONITOR_CRONS}/${EXPECTED}" "Auto-restart is armed for every instance again." 3066993
+        ;;
+esac
 
 # State transitions
 if [ "$CONSECUTIVE_BAD" -ge "$THRESHOLD_MINUTES" ] && [ "$ALERT_STATE" = "healthy" ]; then
