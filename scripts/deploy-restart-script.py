@@ -3,6 +3,17 @@
 Deploy the canonical ktp-scheduled-restart.sh to every game host.
 
 Safety model:
+  - CONTENT GUARD, before anything touches the fleet: the canonical is
+    gitignored and untracked, so `git status` can never flag drift in it and a
+    deploy will otherwise ship whatever happens to be sitting there. The guard
+    diffs it against the TRACKED `.example` and refuses unless the only
+    differences are the values of allowlisted @hostinfo assignments. Per
+    docs/runbooks/SCHEDULED_RESTART_LINEAGES.md the canonical (L2) is the
+    `.example` (L3) with two placeholders filled, and that is the whole of its
+    licence to differ. Drift runs BOTH ways — `.example` has been ahead.
+    The allowlisted values are live Discord channel IDs in a public repo, so
+    findings name keys and line numbers and never a value. Override with
+    --override-example-guard "<reason>".
   - The canonical script is gitignored (it embeds the relay AUTH_SECRET), so
     there is no git baseline. Instead: fetch every host's deployed copy FIRST
     and require fleet consensus (all identical). The consensus md5 becomes the
@@ -28,13 +39,18 @@ Safety model:
 
 Usage:
     deploy-restart-script.py [--hosts atlanta,dallas] [--force] [--dry-run]
+                             [--override-example-guard REASON]
 
 Password: $KTP_FLEET_SSH_PASSWORD or ~/.ktp_fleet_ssh_password (never hardcoded).
 """
 
 import argparse
+import collections
+import difflib
 import hashlib
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -53,6 +69,33 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL = os.path.join(SCRIPT_DIR, "ktp-scheduled-restart.sh")
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 REMOTE_PATH = "ktp-scheduled-restart.sh"  # relative to ~dodserver
+EXAMPLE_REL = "scripts/ktp-scheduled-restart.sh.example"
+EXAMPLE = os.path.join(REPO_ROOT, *EXAMPLE_REL.split("/"))
+
+# The only assignments the canonical may differ from the tracked `.example` on.
+# Live Discord channel IDs in a public repo: compared by KEY, never by value,
+# and never printed. Derived three ways that agree — the `.example` marks
+# exactly these two values as placeholders, they are the only assignments that
+# actually differ, and SCHEDULED_RESTART_LINEAGES.md calls L2 "L3 with two
+# placeholders filled". allowlist_gaps() re-derives the first of those on every
+# run so a third placeholder cannot appear without saying so.
+HOSTINFO_KEYS = ("CHANNEL_KTP", "CHANNEL_EXTERNAL")
+_MASK = "<hostinfo-value-withheld>"
+
+# Single-line anchors: a phrase spanning a line break is a documented false zero
+# in this exact file, so each is asserted within one line, exactly once.
+EXAMPLE_ANCHORS = (
+    "#!/bin/bash",
+    "CHANNEL_KTP=",
+    "CHANNEL_EXTERNAL=",
+    "SOCKMAP_PATTERN='stale socket_map_ entry'",
+)
+EXAMPLE_MIN_LINES = 400
+
+_ASSIGN = re.compile(r"^(\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=)(.*)$")
+_PLACEHOLDER = re.compile(r"(?i)placeholder|changeme|replace_?me|your_|__[A-Z0-9_]+__")
+
+Finding = collections.namedtuple("Finding", "kind detail")
 
 SERVERS = {
     'atlanta': '74.91.121.9',
@@ -75,6 +118,178 @@ TRIPWIRES = [
     ("grep -c 'stale socket_map_ entry' {path}", 1, ">="),
     ("grep -c 'SOCKMAP_CONTROL' {path}", 2, ">="),
 ]
+
+
+def normalise(text):
+    """Lines, with CRLF/CR folded to LF and trailing whitespace off each line."""
+    return [ln.rstrip() for ln in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+
+
+def normalisation_is_inert(text):
+    """True when normalise() only split lines — it discarded no byte that differs.
+
+    Trailing whitespace is content inside a heredoc, so the guard reports when
+    this is false instead of quietly comparing something it altered.
+    """
+    return "\r" not in text and all(ln == ln.rstrip() for ln in text.split("\n"))
+
+
+def assignment_key(line):
+    m = _ASSIGN.match(line)
+    return m.group(2) if m else None
+
+
+def mask_hostinfo(lines, keys=HOSTINFO_KEYS):
+    out = []
+    for ln in lines:
+        m = _ASSIGN.match(ln)
+        out.append(m.group(1) + _MASK if m and m.group(2) in keys else ln)
+    return out
+
+
+def allowlist_gaps(example_text, keys=HOSTINFO_KEYS):
+    """Placeholder-valued keys in the `.example` that the allowlist misses.
+
+    Blocking, not advisory: a fill-me value this tool does not know about is one
+    it cannot tell a filled value from a wrong one for.
+    """
+    gaps = []
+    for i, ln in enumerate(normalise(example_text), 1):
+        m = _ASSIGN.match(ln)
+        if m and m.group(2) not in keys and _PLACEHOLDER.search(m.group(3).strip().strip("\"'")):
+            gaps.append((i, m.group(2)))
+    return gaps
+
+
+def _describe_canonical(idx, line):
+    """Canonical lines are never printed — this file is the one holding secrets."""
+    key = assignment_key(line)
+    return "canonical:%d  %s" % (idx, ("assignment %s=" % key) if key else "(content withheld)")
+
+
+def _describe_example(idx, line):
+    """`.example` lines may be printed: they are tracked in this public repo."""
+    return "example:%d    | %s" % (idx, line)
+
+
+def example_guard(canonical_text, example_text, keys=HOSTINFO_KEYS):
+    """Findings that must be empty for the canonical to be safe to ship.
+
+    Pass condition: after normalisation, and after masking the value of every
+    allowlisted assignment in BOTH files, the two are line-for-line identical —
+    and the canonical's own allowlisted values are filled in rather than the
+    placeholders it was regenerated from. An unfilled one kills the 03:00
+    Discord notification while the restart still prints green.
+    """
+    can = mask_hostinfo(normalise(canonical_text), keys)
+    ex = mask_hostinfo(normalise(example_text), keys)
+
+    findings = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, can, ex, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        detail = [" -" + _describe_canonical(i + 1, can[i]) for i in range(i1, i2)]
+        detail += [" +" + _describe_example(j + 1, ex[j]) for j in range(j1, j2)]
+        findings.append(Finding(tag, "\n".join(detail)))
+
+    for i, ln in enumerate(normalise(canonical_text), 1):
+        m = _ASSIGN.match(ln)
+        if not m or m.group(2) not in keys:
+            continue
+        value = m.group(3).strip().strip("\"'")
+        if not value:
+            findings.append(Finding("unfilled", " !canonical:%d  %s is EMPTY" % (i, m.group(2))))
+        elif _PLACEHOLDER.search(value):
+            findings.append(Finding(
+                "unfilled", " !canonical:%d  %s still holds the .example placeholder" % (i, m.group(2))))
+
+    for line_no, key in allowlist_gaps(example_text, keys):
+        findings.append(Finding(
+            "allowlist-gap",
+            " !example:%d    %s is a placeholder the allowlist does not cover — add it to "
+            "HOSTINFO_KEYS if it is host-specific" % (line_no, key)))
+    return findings
+
+
+def load_tracked_example(repo_root=REPO_ROOT, refs=("origin/main", "HEAD")):
+    """(text, source) for the tracked `.example`, preferring the git blob.
+
+    The working-tree file is the obvious source and the wrong one: a checkout
+    behind origin/main carries a stale `.example` and the compare then fails on
+    hundreds of lines that are not drift. Argument list, never a shell string —
+    Git Bash rewrites `ref:scripts/…` into a Windows path and `git show` then
+    fails silently.
+    """
+    for ref in refs:
+        try:
+            r = subprocess.run(["git", "-C", repo_root, "show", "%s:%s" % (ref, EXAMPLE_REL)],
+                               capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            break
+        if r.returncode == 0:
+            return r.stdout.decode("utf-8"), "git %s:%s" % (ref, EXAMPLE_REL)
+    if os.path.exists(EXAMPLE):
+        with open(EXAMPLE, "rb") as fh:
+            return fh.read().decode("utf-8"), "working tree (NO git blob readable)"
+    raise SystemExit("cannot read the tracked %s from git or the working tree" % EXAMPLE_REL)
+
+
+def check_example_control(text, source):
+    """Prove the real `.example` was read, not an empty string or a stub."""
+    lines = text.split("\n")
+    if len(lines) < EXAMPLE_MIN_LINES:
+        raise SystemExit("example control FAILED: %s yielded %d lines (want >= %d) — "
+                         "the guard would have compared against nothing"
+                         % (source, len(lines), EXAMPLE_MIN_LINES))
+    for anchor in EXAMPLE_ANCHORS:
+        n = sum(1 for ln in lines if anchor in ln)
+        if n != 1:
+            raise SystemExit("example control FAILED: anchor %r found on %d lines in %s (want 1)"
+                             % (anchor, n, source))
+
+
+def validated_override(reason):
+    """The override's reason, or SystemExit. A blank one is not an override."""
+    if reason is not None and not reason.strip():
+        raise SystemExit('--override-example-guard needs a reason, not an empty string')
+    return reason
+
+
+def gate_on_example(canonical_text, override_reason):
+    """Run the content guard and refuse the deploy on any finding."""
+    example_text, source = load_tracked_example()
+    check_example_control(example_text, source)
+    print("\nContent guard vs the tracked .example")
+    print("  source:    %s (%d bytes)" % (source, len(example_text.encode("utf-8"))))
+    print("  allowlist: %s" % ", ".join(HOSTINFO_KEYS))
+    for text, label in ((canonical_text, "canonical"), (example_text, "example")):
+        if not normalisation_is_inert(text):
+            print("  note:      normalisation altered the %s (CR bytes or trailing "
+                  "whitespace present) — it is not comparing the raw file" % label)
+    if os.path.exists(EXAMPLE):
+        with open(EXAMPLE, "rb") as fh:
+            if fh.read().decode("utf-8") != example_text and not source.startswith("working tree"):
+                print("  note:      the working-tree .example differs from the tracked blob "
+                      "(stale checkout) — the tracked blob is what was compared")
+
+    findings = example_guard(canonical_text, example_text)
+    if not findings:
+        print("  PASS: identical outside the allowlisted @hostinfo values")
+        return
+    print("  FAIL: %d finding(s) outside the allowlist" % len(findings))
+    for f in findings:
+        print("  [%s]" % f.kind)
+        print(f.detail)
+    if not override_reason:
+        raise SystemExit(
+            "\nRefusing to deploy. Reconcile scripts/ktp-scheduled-restart.sh against the\n"
+            "tracked .example (docs/runbooks/SCHEDULED_RESTART_LINEAGES.md — read the\n"
+            "DELETIONS, they are the ones that cost something), or rerun with\n"
+            '  --override-example-guard "<why the .example is deliberately out of step>"')
+    print("\n" + "!" * 72)
+    print("EXAMPLE GUARD OVERRIDDEN — shipping content that does not match the tracked .example")
+    print("reason: %s" % override_reason)
+    print("!" * 72)
 
 
 def fleet_password():
@@ -116,7 +331,12 @@ def main():
                     help='overwrite even when a host drifted from the fleet consensus '
                          '(the canonical is gitignored — consensus IS the baseline)')
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--override-example-guard', metavar='REASON',
+                    help='ship despite content-guard findings. REASON is printed and must say '
+                         'why the tracked .example is deliberately out of step with the '
+                         'canonical; deliberately not a bare --force')
     args = ap.parse_args()
+    override_reason = validated_override(args.override_example_guard)
 
     targets = list(SERVERS) if not args.hosts else [h.strip() for h in args.hosts.split(',')]
     for t in targets:
@@ -128,6 +348,10 @@ def main():
         raise SystemExit("canonical script contains CR bytes — fix line endings first")
     local_md5 = md5_bytes(local)
     print(f"canonical (working tree): {local_md5}  ({len(local)} bytes)")
+
+    # Before the password, before any socket: a guard that runs after the fleet
+    # has been touched is a report, not a gate.
+    gate_on_example(local.decode('utf-8'), override_reason)
 
     pw = fleet_password()
 
@@ -159,7 +383,6 @@ def main():
         print("\nFleet already matches the canonical — nothing to deploy.")
         return
     if sample_content is not None:
-        import difflib
         diff = list(difflib.unified_diff(
             sample_content.decode(errors='replace').splitlines(),
             local.decode(errors='replace').splitlines(),
