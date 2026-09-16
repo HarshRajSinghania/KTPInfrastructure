@@ -91,7 +91,7 @@ from scripts.side_splits import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 13  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats
+SCHEMA_VERSION = 14  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -120,6 +120,8 @@ CAPTURE_EVENT_TYPES_OPTIONAL = (
     "score",
     "duel",
     "player_state",
+    # Grenade throw (migration 034, KTPAMXX 1.23.0).
+    "grenade_throw",
 )
 TEAM_NAMES = {1: "Allies", 2: "Axis"}
 GRENADE_WEAPON_TYPES = {13: "handgrenade", 14: "stickgrenade", 36: "mills_bomb"}
@@ -162,10 +164,12 @@ INTEGER_COLUMNS = {
     "life_shots", "life_shots_hitscan", "lives_fired", "score_events",
     "score_points", "score_points_placed", "score_events_unresolved",
     "head_hits", "chest_hits", "stomach_hits", "arm_hits", "leg_hits",
+    "grenade_throws", "grenade_bursts_matched", "grenade_cooked",
 }
 FLOAT_COLUMNS = {
     "kd_ratio", "kda_ratio", "damage_per_minute", "damage_per_life",
     "headshot_rate", "raw_accuracy", "game_time", "first_shot_delay_avg",
+    "grenade_flight_avg",
 }
 
 
@@ -358,6 +362,9 @@ SELECT
   EXISTS(SELECT 1 FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name = 'ktp_duel_stats')
     AS duel_stats,
+  EXISTS(SELECT 1 FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name = 'ktp_grenade_throw_events')
+    AS grenade_throws,
   EXISTS(SELECT 1 FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name = 'hlstats_Events_Statsme')
     AS statsme,
@@ -1045,6 +1052,7 @@ WAVE_PLAYER_KEYS = (
     "damage_applied", "damage_capped_with_applied", "hits_with_applied",
     "life_shots", "life_shots_hitscan", "lives_fired", "first_shot_delay_avg",
     "score_events", "score_points", "score_points_placed", "score_events_unresolved",
+    "grenade_throws", "grenade_bursts_matched", "grenade_flight_avg", "grenade_cooked",
 )
 
 
@@ -1052,6 +1060,7 @@ def attach_wave_facts(
     players: list[dict[str, Any]],
     wave_rows: list[dict[str, Any]] | None,
     score_rows: list[dict[str, Any]] | None,
+    throw_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     """Add expansion wave 1/2 per-player facts to the box-score rows in place.
 
@@ -1063,16 +1072,27 @@ def attach_wave_facts(
     """
     by_id = {int(r["player_id"]): r for r in (wave_rows or [])}
     score_by_id = {int(r["player_id"]): r for r in (score_rows or [])}
+    throw_by_id = {int(r["player_id"]): r for r in (throw_rows or [])}
     for player in players:
         pid = int(player["player_id"])
         wave = by_id.get(pid, {})
         score = score_by_id.get(pid)
+        throw = throw_by_id.get(pid)
         for key in WAVE_PLAYER_KEYS:
             if key.startswith("score_"):
                 if score_rows is None:
                     player[key] = None
                 else:
                     player[key] = (score or {}).get(key, 0)
+            elif key.startswith("grenade_"):
+                # Same rule as score: a player with no throw row threw nothing
+                # (0), but only when the throw source was queried at all.
+                if throw_rows is None:
+                    player[key] = None
+                elif key == "grenade_flight_avg":
+                    player[key] = (throw or {}).get(key)
+                else:
+                    player[key] = (throw or {}).get(key, 0)
             else:
                 player[key] = wave.get(key)
 
@@ -1326,7 +1346,8 @@ def wave_markdown(report: dict[str, Any]) -> list[str]:
     have_wave1 = any(p.get("damage_applied") is not None or p.get("life_shots") is not None
                      for p in players)
     have_score = any(p.get("score_points") is not None for p in players)
-    if not have_wave1 and not have_score:
+    have_throws = any(p.get("grenade_throws") is not None for p in players)
+    if not have_wave1 and not have_score and not have_throws:
         return ["Not available: no half of this match came from a 1.21.0+ producer "
                 "(migration 032 fields are NULL, never zero, for older builds)."]
     duel_stats = report.get("duel_stats")
@@ -1338,11 +1359,14 @@ def wave_markdown(report: dict[str, Any]) -> list[str]:
             ("first_shot_delay_avg", "1st shot (s)"),
             ("score_points", "Score pts"), ("score_points_placed", "Placed"),
             ("score_events_unresolved", "Unplaced ev."),
+            ("grenade_throws", "Nades"), ("grenade_flight_avg", "Flight (s)"),
+            ("grenade_cooked", "Cooked"),
         ]),
         "Applied = health actually removed (overkill and armour excluded); shots are "
         "per-life weapon_fire counts, independent of hit registration; 1st shot is "
         "spawn to first shot, not reaction time. Score points are the engine's own "
-        "awards; placed = attributed to a resolved flag.",
+        "awards; placed = attributed to a resolved flag. Nades = throws (AmmoX edge); "
+        "flight = throw to burst (the tracked lifecycle row); cooked = flight under 3.5 s.",
         (f"Duel stats (dodx vstats): {len(duel_stats)} attacker/victim pairs with "
          f"shots, hits, damage and hit groups in the JSON report."
          if duel_stats is not None else
@@ -1739,7 +1763,11 @@ def build_report(
         query_rows(db, "duel_stats_fact.sql", match_id)
         if sources.get("duel_stats", False)
         and capture_stream_authorized(capture_authorization, "duel") else None)
-    attach_wave_facts(players, wave_players, score_players)
+    grenade_throws = (
+        query_rows(db, "grenade_throw_fact.sql", match_id)
+        if sources.get("grenade_throws", False)
+        and capture_stream_authorized(capture_authorization, "grenade_throw") else None)
+    attach_wave_facts(players, wave_players, score_players, grenade_throws)
     enriched_frag_available = bool(
         sources.get("frag_context", False)
         and sources.get("frag_event_clock", False)
