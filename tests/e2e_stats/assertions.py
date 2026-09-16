@@ -1874,7 +1874,8 @@ SELECT COUNT(*) FROM ktp_capture_health
 WHERE BINARY match_id=BINARY {literal} AND half={int(half)}
   AND (event_type NOT IN ('life','damage','position','frag','assist','break',
                           'flag_state','flag_position','objective_attempt',
-                          'grenade_entity','team_membership','shot')
+                          'grenade_entity','team_membership','shot',
+                          'score','duel','player_state')
        OR attempted IS NULL OR attempted < 0
        OR enqueued IS NULL OR enqueued < 0
        OR dropped IS NULL OR dropped < 0

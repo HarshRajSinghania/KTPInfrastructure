@@ -106,6 +106,7 @@ DEFAULT_SCHEMA_FILES = (
     "sql/migrate_030_shot_target_player.sql",
     "sql/migrate_031_shot_shooter_stance.sql",
     "sql/migrate_032_wave1_additive_fields.sql",
+    "sql/migrate_033_wave2_streams.sql",
 )
 
 DEFAULT_SEED_FILES = (
