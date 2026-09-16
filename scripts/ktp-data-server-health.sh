@@ -56,6 +56,27 @@ CRITICAL_TIMERS=(
     # Files renamed demos into the published tree and rebuilds the archive
     # pages. Stopped, it is silent: the site keeps serving yesterday's index.
     ktp-demo-publish.timer
+    # The seven below were added 2026-09-16 after ALERT_COVERAGE.md found this
+    # list naming 3 of the box's 10 live timers. OnFailure= fires when a unit
+    # runs and fails; nothing fires when a timer stops scheduling it at all,
+    # and every one of these goes quiet in a way that reads as healthy.
+    #
+    # The check written after the 9h48m HLTV outage (2026-08-10). If this timer
+    # stops, that check stops, and the next dead proxy is found the old way.
+    ktp-hltv-liveness.timer
+    # Watches the ingest path for the failures that are otherwise silent; a
+    # stopped watcher is the most silent failure of all.
+    ktp-hlstatsx-ingest-monitor.timer
+    # Exports stop; the last file stays in place and reads as current.
+    ktp-stats-export.timer
+    # Reconciliation stops; identities drift apart with no error anywhere.
+    ktp-identity-reconcile.timer
+    ktp-roster-history-audit.timer
+    # Corpus pushes stop; the offsite copy quietly ages.
+    ktp-corpus-push.timer
+    ktp-corpus-push-denver.timer
+    # Not listed: ktp-monday-reminder.timer. A reminder that fails to arrive is
+    # noticed by the people expecting it, which is the alert.
 )
 
 # Central ban-list renderer. Checked on three independent legs because each one
