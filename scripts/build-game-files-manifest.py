@@ -188,7 +188,6 @@ WEAPON_FAMILIES = [
     ("enfield_scoped", ["p_enfields", "p_enfields_l"],                               ["w_enfield_scoped"]),
     ("sten",           ["p_sten"],                                                   ["w_sten"]),
     ("bren",           ["p_brenbu", "p_brenbd", "p_brenbr", "p_brensr", "p_bren_l"], ["w_bren"]),
-    ("piat",           ["p_piat"],                                                   ["w_piat", "w_piat_rocket"]),
 ]
 
 # Names that look like kit members and are not, keyed so the reason travels with the
@@ -217,6 +216,19 @@ EXCLUDED_WEAPON_MODELS = {
     # offers it and both files are byte-identical copies of the PIAT models.
     "p_mortar":     "dead-code reference; no class can spawn a mortar",
     "w_mortar":     "dead-code reference; no class can spawn a mortar",
+    # ⚠️ A DIFFERENT CLASS OF EXCLUSION FROM EVERY ENTRY ABOVE. These files are stock,
+    # shipped, binary-referenced and loadable — they are out by LEAGUE POLICY, not
+    # because they are dead. Operator ruling 2026-09-16: the PIAT is not used in KTP
+    # competitive play. It is technically obtainable playing British with the bazooka
+    # enabled, which normal competitive play does not do.
+    # ➡️ If KTP ever enables British + bazooka in competitive play, these come back:
+    #    delete the three lines and restore ("piat", ["p_piat"], ["w_piat", "w_piat_rocket"]).
+    # 📌 Zero PIAT kills in 1,597,498 recorded frags at the time of the ruling, which is
+    #    corroboration, not the reason — an anti-tank weapon can be held and seen without
+    #    ever appearing in a frag row.
+    "p_piat":        "not used in KTP competitive play (operator ruling 2026-09-16)",
+    "w_piat":        "not used in KTP competitive play (operator ruling 2026-09-16)",
+    "w_piat_rocket": "not used in KTP competitive play (operator ruling 2026-09-16)",
     # Stock, referenced by neither binary.
     "p_sten_l":     "in depot 31, referenced by neither binary",
 }
