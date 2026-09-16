@@ -1,0 +1,14 @@
+// Overview: Zoom 1.31, Map Origin (738.00, 24.00, 120.00), Z Min 689.00, Z Max -449.00, Rotated 0
+
+global 
+{
+	ZOOM	1.32
+	ORIGIN	731.94 		17.94		120.00
+	ROTATED	0
+}
+
+layer 
+{
+	IMAGE	"overviews/dod_aleutian2_test3.bmp"
+	HEIGHT	-449.00
+}

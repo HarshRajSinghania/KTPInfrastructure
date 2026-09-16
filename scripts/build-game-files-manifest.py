@@ -10,9 +10,9 @@ Three sources combined:
   2. KTPFileChecker ktp_file.ini (the engine consistency-check list the plugin
      actually loads: player models, player sounds — assets NOT referenced by
      any .res because they ship with stock DoD)
-  3. Explicit additions (user policy: standard US-vs-Wehrmacht weapon kit
-     in p_/w_ primary variants + grenade viewmodels at severity "review";
-     _l/l pose variants pruned 2026-05-13)
+  3. Explicit additions (user policy: every stock held (p_) and world (w_)
+     weapon model the game binaries load, the lowered/sprint _l set included,
+     + grenade viewmodels at severity "review")
 
 Excluded buckets (allowed modification): overviews/*, flag models
 (w_aflag/gflag/wflag).
@@ -130,28 +130,110 @@ ALTERNATE_HASHES = {
     # recognise this one" is not a reason to withhold its bytes.
 }
 
-# Standard US-vs-Wehrmacht weapon kit. Each tuple: (family, p_base, w_base).
-# `.mdl` extension implicit. Primary variants only: the _l/l lowered/left-hand
-# pose variants were PRUNED 2026-05-13 (operator call — not stock DoD, likely
-# community-mod files; they put MissingFiles noise in every clean-install
-# session without contributing verdict weight). Do not re-add without confirming
-# they are stock DoD files.
+# Every stock held (p_) and world (w_) weapon model the game loads, grouped by
+# weapon. Each tuple: (family, [p_bases], [w_bases]); `.mdl` implicit. A family may
+# hold several held models (bipod up/down, prone, sprint/lowered `_l`) and several
+# world models (the dropped weapon and its projectile).
+#
+# 🔑 A name earns a place here by passing BOTH legs; one that fails either is a dead
+# entry that reads as coverage:
+#   1. the game binary loads it -- `strings` over dod/dlls/dod.so + dod/cl_dlls/client.so
+#      names the literal path (the only format-string model path in either binary is
+#      models/player/%s/%s.mdl, so a zero-hit name is a name nothing loads);
+#   2. a stock client has it -- it is in Steam depot 31, the depot app 30 installs
+#      (`DepotDownloader -app 90 -depot 31 -manifest-only`, anonymous).
+# Presence on a server tree is NOT leg 2: the fleet install carries a community pack
+# of extra p_*.mdl the engine never references. p_bar/p_mp44 sat here on exactly that
+# mistake until 2026-09-15, reported missing by nearly every client scan while the
+# real p_barbu/p_barbd/p_stg44 went unhashed. w_colt/w_luger/w_spade were the same
+# bug on the w_ side: stock files, so never "missing", but pistols and melee cannot
+# be dropped and no binary references them.
+#
+# The 2026-05-13 prune of "the _l/l pose variants" was half right. The no-underscore
+# names (p_garandl, p_tommyl, ...) are community files; the underscore `_l` lowered/
+# sprint held models are stock, loaded by the binary, and what opponents render while
+# a player sprints. They carry the family's own severity. The community names are
+# pinned out BY NAME in EXCLUDED_WEAPON_MODELS so "_l" is never read as a pattern.
 WEAPON_FAMILIES = [
-    ("amerk_grenade",  "p_amerk",   "w_amerk"),
-    ("bar",            "p_bar",     "w_bar"),
-    ("colt",           "p_colt",    "w_colt"),
-    ("garand",         "p_garand",  "w_garand"),
-    ("k43",            "p_k43",     "w_k43"),
-    ("luger",          "p_luger",   "w_luger"),
-    ("m1carb",         "p_m1carb",  "w_m1carb"),
-    ("mp40",           "p_mp40",    "w_mp40"),
-    ("mp44",           "p_mp44",    "w_mp44"),
-    ("k98_unscoped",   "p_k98",     "w_98k"),
-    ("k98_scoped",     "p_k98s",    "w_scoped98k"),
-    ("spade",          "p_spade",   "w_spade"),
-    ("spring",         "p_spring",  "w_spring"),
-    ("tommy",          "p_tommy",   "w_tommy"),
+    # US
+    ("amerknife",      ["p_amerk"],                                                  ["w_amerk"]),
+    ("colt",           ["p_colt"],                                                   []),
+    ("garand",         ["p_garand", "p_garand_l"],                                   ["w_garand"]),
+    ("m1carb",         ["p_m1carb", "p_m1carb_l"],                                   ["w_m1carb"]),
+    ("fcarb",          ["p_fcarb", "p_fcarb_l"],                                     ["w_fcarb"]),
+    ("tommy",          ["p_tommy", "p_tommy_l"],                                     ["w_tommy"]),
+    ("grease",         ["p_grease", "p_grease_l"],                                   ["w_greasegun"]),
+    ("bar",            ["p_barbu", "p_barbd"],                                       ["w_bar"]),
+    ("spring",         ["p_spring", "p_spring_l"],                                   ["w_spring"]),
+    ("30cal",          ["p_30cal", "p_30calpr", "p_30calsr"],                        ["w_30cal"]),
+    ("bazooka",        ["p_bazooka", "p_bazooka_l"],                                 ["w_bazooka", "w_bazooka_rocket"]),
+    ("paraknife",      ["p_paraknife"],                                              ["w_paraknife"]),
+    # Wehrmacht
+    ("spade",          ["p_spade"],                                                  []),
+    ("luger",          ["p_luger"],                                                  []),
+    ("k98_unscoped",   ["p_k98", "p_k98_l"],                                         ["w_98k"]),
+    ("k98_scoped",     ["p_k98s", "p_k98s_l"],                                       ["w_scoped98k"]),
+    ("k43",            ["p_k43"],                                                    ["w_k43"]),
+    ("mp40",           ["p_mp40"],                                                   ["w_mp40"]),
+    ("mp44",           ["p_stg44"],                                                  ["w_mp44"]),
+    ("fg42",           ["p_fg42bu", "p_fg42bd", "p_fg42pr", "p_fg42sr"],             ["w_fg42"]),
+    ("fg42_scoped",    ["p_fg42s"],                                                  ["w_fg42s"]),
+    ("mg42",           ["p_mg42bu", "p_mg42bd", "p_mg42pr", "p_mg42sr"],             ["w_mg42"]),
+    ("mg34",           ["p_mg34bu", "p_mg34bd", "p_mg34pr", "p_mg34sr"],             ["w_mg34"]),
+    ("pschreck",       ["p_pschreck", "p_pschreck_l"],                               ["w_pschreck", "w_pschreck_rocket"]),
+    # British
+    ("fairbairn",      ["p_fairbairn"],                                              []),
+    ("webley",         ["p_webley"],                                                 []),
+    ("enfield",        ["p_enfield", "p_enfield_l"],                                 ["w_enfield"]),
+    ("enfield_scoped", ["p_enfields", "p_enfields_l"],                               ["w_enfield_scoped"]),
+    ("sten",           ["p_sten"],                                                   ["w_sten"]),
+    ("bren",           ["p_brenbu", "p_brenbd", "p_brenbr", "p_brensr", "p_bren_l"], ["w_bren"]),
+    ("piat",           ["p_piat"],                                                   ["w_piat", "w_piat_rocket"]),
 ]
+
+# Names that look like kit members and are not, keyed so the reason travels with the
+# name. _check_weapon_families() refuses a table that names one of these.
+EXCLUDED_WEAPON_MODELS = {
+    # On the fleet tree via a community pack; in no client install.
+    "p_bar":        "not in depot 31; the game loads p_barbu/p_barbd",
+    "p_mp44":       "not in depot 31; the game loads p_stg44",
+    # The community half of the 2026-05-13 prune. Not the stock `_l` models, and not
+    # to come back by pattern-matching on a trailing "l".
+    "p_garandl":    "community lowered model, not in depot 31",
+    "p_tommyl":     "community lowered model, not in depot 31",
+    "p_k43l":       "community lowered model, not in depot 31",
+    "p_98kl":       "community lowered model, not in depot 31",
+    "p_k98sl":      "community lowered model, not in depot 31",
+    "p_fcarbl":     "community lowered model, not in depot 31",
+    "p_greasegunl": "community lowered model, not in depot 31",
+    "p_m1carbl":    "community lowered model, not in depot 31",
+    "p_springl":    "community lowered model, not in depot 31",
+    # Stock and shipped, but no binary references them: pistols and melee cannot be
+    # dropped, so there is no world model to load.
+    "w_colt":       "in depot 31, referenced by neither binary",
+    "w_luger":      "in depot 31, referenced by neither binary",
+    "w_spade":      "in depot 31, referenced by neither binary",
+    # Stock and referenced, but only by the mortar, which 1.3 cannot spawn: no class
+    # offers it and both files are byte-identical copies of the PIAT models.
+    "p_mortar":     "dead-code reference; no class can spawn a mortar",
+    "w_mortar":     "dead-code reference; no class can spawn a mortar",
+    # Stock, referenced by neither binary.
+    "p_sten_l":     "in depot 31, referenced by neither binary",
+}
+
+
+def _check_weapon_families():
+    named = [b for _, p_bases, w_bases in WEAPON_FAMILIES for b in (*p_bases, *w_bases)]
+    excluded = sorted(set(named) & set(EXCLUDED_WEAPON_MODELS))
+    if excluded:
+        raise ValueError("WEAPON_FAMILIES names excluded models: "
+                         + ", ".join(f"{n} ({EXCLUDED_WEAPON_MODELS[n]})" for n in excluded))
+    dup = sorted(n for n, c in Counter(named).items() if c > 1)
+    if dup:
+        raise ValueError(f"WEAPON_FAMILIES names a model in more than one family: {dup}")
+
+
+_check_weapon_families()
 
 
 # --------------------------------------------------------------------------
@@ -204,6 +286,11 @@ def hash_remote_file(ssh, full_path):
     if len(lines) < 2 or " " not in lines[0]:
         return None
     return lines[0].split()[0], int(lines[1])
+
+
+def variant_for(base):
+    """`_l` is the stock lowered/sprint pose of a held model; everything else is primary."""
+    return "lowered" if base.endswith("_l") else "primary"
 
 
 def severity_for(path):
@@ -363,7 +450,7 @@ def build_manifest(ssh, dod_path, filelist_path):
         })
         seen.add(path)
 
-    # 4. Weapon kit families — find .mdl + _l.mdl + l.mdl variants
+    # 4. Weapon kit families
     print(f"[build] Weapon-kit families ({len(WEAPON_FAMILIES)})...", file=sys.stderr)
     # Drop any prior weapon model entries from the .res / filelist sources so
     # the explicit weapon-kit pass owns the per-family categorization (severity,
@@ -373,13 +460,15 @@ def build_manifest(ssh, dod_path, filelist_path):
     seen = {e["path"] for e in entries}
 
     weapon_added = 0
-    for family, p_base, w_base in WEAPON_FAMILIES:
-        for base in (p_base, w_base):
+    weapon_missing = []
+    for family, p_bases, w_bases in WEAPON_FAMILIES:
+        for base in (*p_bases, *w_bases):
             rel = f"models/{base}.mdl"
             if rel in seen:
                 continue
             result = hash_remote_file(ssh, f"{dod_path}/{rel}")
             if result is None:
+                weapon_missing.append(rel)
                 continue
             sha, size = result
             entries.append({
@@ -388,11 +477,15 @@ def build_manifest(ssh, dod_path, filelist_path):
                 "category": "weapon_player_model" if base.startswith("p_") else "weapon_world_model",
                 "severity": severity_for(rel),
                 "weapon_family": family,
-                "variant": "primary",
+                "variant": variant_for(base),
             })
             seen.add(rel)
             weapon_added += 1
 
+    # A kit path the source server lacks is a stock file gone missing from the tree,
+    # never a file to skip quietly: every client has it and it would go unhashed.
+    if weapon_missing:
+        print(f"[build]   ⚠ weapon-kit paths not found on server: {weapon_missing}", file=sys.stderr)
     print(f"[build]   weapon-kit added: {weapon_added}", file=sys.stderr)
 
     return entries
@@ -451,13 +544,13 @@ def assemble_manifest(entries, source_server_label, dod_path):
             "sources": dict(src_counts),
             "severity_semantics": {
                 "violation": "Mismatch is a hard violation. Reported in dossier and counts toward verdict.",
-                "review": "Mismatch surfaces in dossier as 'admin review' item, NOT a violation. Player's local file copied into session bundle's review_files/ subdirectory for admin inspection. Use cases: lowered-carry / left-handed variants where the model legitimately differs across map states or community packs; skyboxes (gfx/env/*), where custom sky packs are commonplace and legitimate but a transparent or flattened sky is a real visual advantage worth an admin's eyes; and first-person grenade viewmodels (models/v_{grenade,mills,stick}.mdl), which are allowed at any hash but are still worth an admin's eyes.",
+                "review": "Mismatch surfaces in dossier as 'admin review' item, NOT a violation. Player's local file copied into session bundle's review_files/ subdirectory for admin inspection. Use cases: skyboxes (gfx/env/*), where custom sky packs are commonplace and legitimate but a transparent or flattened sky is a real visual advantage worth an admin's eyes; and first-person grenade viewmodels (models/v_{grenade,mills,stick}.mdl), which are allowed at any hash but are still worth an admin's eyes.",
             },
             "scope_notes": [
-                "Standard US-vs-Wehrmacht 6v6 weapon kit. British/commonwealth and paratrooper-class weapons NOT enforced.",
+                "Every stock held (p_) and world (w_) weapon model the game binaries load -- US, Wehrmacht and British/paratrooper alike, the stock _l lowered/sprint held models included -- enforced as violations: these are what opponents render.",
                 "v_*.mdl (first-person view models) NOT enforced, EXCEPT grenade viewmodels (v_grenade/v_mills/v_stick), which are IN scope at severity 'review' since 2026-09-13. They are allowed at any hash and never count toward a verdict; they are listed so a modified copy is still captured for admin review, which excluding them made impossible. p_/w_ grenade models stay enforced as violations.",
                 "gfx/env/* (skyboxes) IN scope at severity 'review' since 2026-08-27 (was an excluded bucket). Reported and captured for admin review; never counts toward a verdict. Only skyboxes a map .res references enter scope -- stock skies are unreferenced and stay out.",
-                "_l / l-suffix pose variants NOT enforced — pruned 2026-05-13 (non-stock community files; MissingFiles noise on clean installs).",
+                "Kept out by name (EXCLUDED_WEAPON_MODELS): the no-underscore l-suffix names (p_garandl, p_tommyl, ...) are community files, not stock; w_colt/w_luger/w_spade are stock but loaded by nothing (pistols and melee cannot be dropped); the mortar models are stock but no 1.3 class can spawn the weapon.",
             ],
             "excluded_buckets": [
                 "models/{w_aflag,w_gflag,w_wflag}.mdl (flag — cosmetic, allowed)",

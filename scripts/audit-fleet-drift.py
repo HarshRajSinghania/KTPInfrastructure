@@ -779,7 +779,7 @@ def save_state(path, repo_drift_keys):
         print(f'WARN: could not save state file {path}: {e}', file=sys.stderr)
 
 
-def post_discord(relay_url, auth_secret, channel_id, title, description, color=16753920):
+def post_discord(relay_url, auth_secret, channel_id, title, description, color=16763904):
     """Post an embed to the KTP Discord relay. Mirrors send_discord_embed from
     ktp-scheduled-restart.sh. Silent on failure (we don't want a broken relay
     to fail the audit run)."""
@@ -909,8 +909,8 @@ def main():
             if resolved_keys:
                 lines.extend(render_group('✅ Resolved', resolved_keys))
 
-            # KTP red on new drift, green on pure-resolution
-            color = 16711680 if new_keys else 65280
+            # KTP palette (ktp_alert_routing): red on new drift, green on pure-resolution
+            color = 15548997 if new_keys else 5763719
             post_discord(
                 relay_url, auth_secret, channel_id,
                 title='<:KTP:1002382703020212245> KTP Fleet Drift Δ',
