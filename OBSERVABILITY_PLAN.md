@@ -184,11 +184,12 @@ schedule. No row in `ALERT_COVERAGE.md` covers it. A daemon-side fault ran for
 at least six days, cost one match 87% of its events, was recorded in full
 detail, and was found only because someone went looking for a trends dataset.
 
-**Proposed check.** Per-match capture success rate, as a producer for
-`ktp-data-server-health.sh` rather than a sixth alerting implementation. Alert
-when any match's per-event-type rejection rate crosses a threshold. It is one
-query against a table that already exists, and it would have caught both the
-broad loss and the residual frag bursts on the day.
+**Check shipped** — `capture-loss:<event_type>` in `ktp-data-server-health.sh`:
+per event type over the trailing 24h, warn at 5%, clear at 2%, floor of 200
+received events, latched like the disk checks. A producer for the existing
+health check, not a sixth alerting implementation. Replayed against September's
+daily frag percentages in `tests/unit/test_health_capture_loss.py`: one alert on
+09-02, one recovery after the 09-08 restart, nothing in between.
 
 **Proposed investigation**, read-only, no fleet change:
 
