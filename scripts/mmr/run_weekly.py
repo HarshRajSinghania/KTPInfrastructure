@@ -37,6 +37,7 @@ import ladder as L
 import match_binding as MB
 import performance as PF
 import dossier as DOSSIER
+import mmr_payload as MMRP
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -430,6 +431,23 @@ def main():
     ratings = model.ratings()
     (HERE / "ratings_current.json").write_text(json.dumps(
         {str(p): r for p, r in sorted(ratings.items(), key=lambda kv: -kv[1]["ordinal"])}, indent=1), encoding="utf-8")
+
+    # The website-ready payload, built every run so the operator step is a
+    # single command over a file rather than a job that recomputes ratings on
+    # a box with no business recomputing them. Nothing here publishes it --
+    # see report_service.py import-mmr.
+    try:
+        played = Counter(pid for m in matches for pid in m["t1"] + m["t2"])
+        aliases = {row["id"]: row.get("alias") for row in fetch(args.key, "player", "id,alias")}
+        payload = MMRP.build(ratings, played, aliases,
+                             generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                             source_report_count=counts.get("rated_on_actual_participants", 0))
+        (HERE / "mmr_openskill_payload.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"wrote mmr_openskill_payload.json ({len(payload['players'])} players "
+              f"with an alias, min_matches={payload['min_matches']})")
+    except RuntimeError as exc:      # publishing aid must never fail the run
+        print(f"  mmr payload unavailable: {exc}")
 
     upsets = [r for r in rows if abs(r["p_home"] - r["y"]) > CONFIDENT_MISS]
     cand = challengers(matches, args.holdout)
