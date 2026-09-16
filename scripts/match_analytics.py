@@ -116,6 +116,10 @@ CAPTURE_EVENT_TYPES = (
 # producer/daemon disagreement worth failing on.
 CAPTURE_EVENT_TYPES_OPTIONAL = (
     "shot",
+    # Expansion wave 2 (KTPAMXX 1.22.0, migration 033).
+    "score",
+    "duel",
+    "player_state",
 )
 TEAM_NAMES = {1: "Allies", 2: "Axis"}
 GRENADE_WEAPON_TYPES = {13: "handgrenade", 14: "stickgrenade", 36: "mills_bomb"}
