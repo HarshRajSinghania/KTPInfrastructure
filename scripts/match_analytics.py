@@ -91,7 +91,7 @@ from scripts.side_splits import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 12  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates
+SCHEMA_VERSION = 13  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -158,10 +158,14 @@ INTEGER_COLUMNS = {
     "score", "grenade_kills", "grenade_damage", "grenade_damage_taken",
     "attempt_id", "producer_sequence", "entindex", "serial", "weapon_id",
     "owner_player_id", "owner_engine_userid", "allies_in_zone", "axis_in_zone",
+    "damage_applied", "damage_capped_with_applied", "hits_with_applied",
+    "life_shots", "life_shots_hitscan", "lives_fired", "score_events",
+    "score_points", "score_points_placed", "score_events_unresolved",
+    "head_hits", "chest_hits", "stomach_hits", "arm_hits", "leg_hits",
 }
 FLOAT_COLUMNS = {
     "kd_ratio", "kda_ratio", "damage_per_minute", "damage_per_life",
-    "headshot_rate", "raw_accuracy", "game_time",
+    "headshot_rate", "raw_accuracy", "game_time", "first_shot_delay_avg",
 }
 
 
@@ -343,6 +347,17 @@ SELECT
     WHERE table_schema = DATABASE()
       AND table_name = 'ktp_grenade_entity_events')
     AS grenade_entities,
+  ((SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND ((table_name = 'ktp_damage_events' AND column_name = 'damage_applied')
+        OR (table_name = 'ktp_life_events' AND column_name = 'first_shot_delay'))) = 2)
+    AS wave1_fields,
+  EXISTS(SELECT 1 FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name = 'ktp_score_events')
+    AS score_events,
+  EXISTS(SELECT 1 FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name = 'ktp_duel_stats')
+    AS duel_stats,
   EXISTS(SELECT 1 FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name = 'hlstats_Events_Statsme')
     AS statsme,
@@ -1026,6 +1041,42 @@ def evaluate_quality(
     return {"status": status, "checks": checks}
 
 
+WAVE_PLAYER_KEYS = (
+    "damage_applied", "damage_capped_with_applied", "hits_with_applied",
+    "life_shots", "life_shots_hitscan", "lives_fired", "first_shot_delay_avg",
+    "score_events", "score_points", "score_points_placed", "score_events_unresolved",
+)
+
+
+def attach_wave_facts(
+    players: list[dict[str, Any]],
+    wave_rows: list[dict[str, Any]] | None,
+    score_rows: list[dict[str, Any]] | None,
+) -> None:
+    """Add expansion wave 1/2 per-player facts to the box-score rows in place.
+
+    Every key is present on every player so the DTO shape is stable. A missing
+    source (table or column absent, stream not authorized) or a producer older
+    than the wave leaves None -- never 0, which is a real value for all of
+    these. Score rows are absent for a player who scored nothing, and that IS
+    a zero, so score keys default to 0 only when the score source was queried.
+    """
+    by_id = {int(r["player_id"]): r for r in (wave_rows or [])}
+    score_by_id = {int(r["player_id"]): r for r in (score_rows or [])}
+    for player in players:
+        pid = int(player["player_id"])
+        wave = by_id.get(pid, {})
+        score = score_by_id.get(pid)
+        for key in WAVE_PLAYER_KEYS:
+            if key.startswith("score_"):
+                if score_rows is None:
+                    player[key] = None
+                else:
+                    player[key] = (score or {}).get(key, 0)
+            else:
+                player[key] = wave.get(key)
+
+
 def public_players(players: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove individual positional coverage from shareable player records."""
     public = []
@@ -1269,6 +1320,36 @@ def lifecycle_line(block: dict[str, Any], counts: str) -> str:
     return f"**Withheld** — this stream's capture did not authorize: {md(reason)}"
 
 
+def wave_markdown(report: dict[str, Any]) -> list[str]:
+    """Wave 1/2 box-score columns, or one line saying why they are absent."""
+    players = report.get("players") or []
+    have_wave1 = any(p.get("damage_applied") is not None or p.get("life_shots") is not None
+                     for p in players)
+    have_score = any(p.get("score_points") is not None for p in players)
+    if not have_wave1 and not have_score:
+        return ["Not available: no half of this match came from a 1.21.0+ producer "
+                "(migration 032 fields are NULL, never zero, for older builds)."]
+    duel_stats = report.get("duel_stats")
+    return [
+        markdown_table(players, [
+            ("player_name_at_match", "Player"), ("team_name", "Team"),
+            ("damage_dealt", "Damage"), ("damage_applied", "Applied"),
+            ("life_shots", "Shots/lives"), ("life_shots_hitscan", "Hitscan"),
+            ("first_shot_delay_avg", "1st shot (s)"),
+            ("score_points", "Score pts"), ("score_points_placed", "Placed"),
+            ("score_events_unresolved", "Unplaced ev."),
+        ]),
+        "Applied = health actually removed (overkill and armour excluded); shots are "
+        "per-life weapon_fire counts, independent of hit registration; 1st shot is "
+        "spawn to first shot, not reaction time. Score points are the engine's own "
+        "awards; placed = attributed to a resolved flag.",
+        (f"Duel stats (dodx vstats): {len(duel_stats)} attacker/victim pairs with "
+         f"shots, hits, damage and hit groups in the JSON report."
+         if duel_stats is not None else
+         "Duel stats: not available (needs a 1.22.0 producer and migration 033)."),
+    ]
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     match = report.get("match") or {}
     quality = report["quality"]
@@ -1336,6 +1417,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         duel_matrix_markdown(report.get("duel_matrix", {}), report["players"]),
         "Rows kill columns; team kills are included so the grid reconciles "
         "with the box score exactly.",
+        "", "## Producer waves 1-2", "",
+        *wave_markdown(report),
         "", "## Assists", "",
         markdown_table(report["assists"], [
             ("player_name_at_match", "Assister"), ("team_name", "Team"),
@@ -1644,6 +1727,19 @@ def build_report(
         query_rows(db, "grenade_entity_timeline_fact.sql", match_id)
         if sources.get("grenade_entities", False) else []
     )
+    # Expansion waves 1/2. Column presence says the schema can carry them; the
+    # per-stream manifest verdict says a producer actually declared them.
+    wave_players = (query_rows(db, "wave_player_fact.sql", match_id)
+                    if sources.get("wave1_fields", False) else None)
+    score_players = (
+        query_rows(db, "score_player_fact.sql", match_id)
+        if sources.get("score_events", False)
+        and capture_stream_authorized(capture_authorization, "score") else None)
+    duel_stats = (
+        query_rows(db, "duel_stats_fact.sql", match_id)
+        if sources.get("duel_stats", False)
+        and capture_stream_authorized(capture_authorization, "duel") else None)
+    attach_wave_facts(players, wave_players, score_players)
     enriched_frag_available = bool(
         sources.get("frag_context", False)
         and sources.get("frag_event_clock", False)
@@ -1912,6 +2008,8 @@ def build_report(
         "player_classes": player_classes,
         "in_game_result": in_game_result,
         "duel_matrix": duel_matrix,
+        # Wave 2 (migration 033): None until a 1.22.0 producer's half lands.
+        "duel_stats": duel_stats,
         "assists": with_team_names(assists),
         "weapons": with_team_names(weapons),
         "capture_credits": with_team_names(credits),

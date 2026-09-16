@@ -175,3 +175,39 @@ def test_markdown_states_positional_privacy_without_player_locations():
     assert "Private per-player objective" in rendered
     assert "position_samples" not in rendered
     assert "pos_x" not in rendered
+
+
+def test_attach_wave_facts_keeps_none_for_old_producers_and_zero_for_no_score():
+    players = [{"player_id": 1}, {"player_id": 2}]
+    # Source absent entirely: every wave key present, every value None.
+    analytics.attach_wave_facts(players, None, None)
+    assert all(players[0][k] is None for k in analytics.WAVE_PLAYER_KEYS)
+    # Wave 1 queried but player 2's producer predates 1.21.0 (NULL row), and
+    # score queried but player 2 scored nothing (no row) -- None vs 0.
+    analytics.attach_wave_facts(
+        players,
+        [{"player_id": 1, "damage_applied": 340, "life_shots": 120,
+          "life_shots_hitscan": 118, "first_shot_delay_avg": 4.5,
+          "damage_capped_with_applied": 400, "hits_with_applied": 12, "lives_fired": 9},
+         {"player_id": 2, "damage_applied": None, "life_shots": None,
+          "life_shots_hitscan": None, "first_shot_delay_avg": None,
+          "damage_capped_with_applied": None, "hits_with_applied": 0, "lives_fired": 0}],
+        [{"player_id": 1, "score_events": 3, "score_points": 5,
+          "score_points_placed": 4, "score_events_unresolved": 1}],
+    )
+    assert players[0]["damage_applied"] == 340 and players[0]["score_points"] == 5
+    assert players[1]["damage_applied"] is None
+    assert players[1]["score_points"] == 0
+
+
+def test_wave_markdown_says_why_when_no_wave_data():
+    report = {"players": [{"player_id": 1, "player_name_at_match": "a",
+                           "team_name": "Allies", "damage_applied": None,
+                           "life_shots": None, "score_points": None}],
+              "duel_stats": None}
+    lines = analytics.wave_markdown(report)
+    assert len(lines) == 1 and "1.21.0" in lines[0]
+    report["players"][0]["damage_applied"] = 12
+    lines = analytics.wave_markdown(report)
+    assert any("| a |" in line for line in lines)
+    assert any("Duel stats: not available" in line for line in lines)
