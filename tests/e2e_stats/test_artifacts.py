@@ -119,6 +119,7 @@ def daemon_repo(tmp_path):
         (31, "shot_shooter_stance"),
         (32, "wave1_additive_fields"),
         (33, "wave2_streams"),
+        (34, "grenade_throw_events"),
     ):
         (repo / "sql" / f"migrate_{number:03d}_{name}.sql").write_text(
             f"-- migration {number}\n")
@@ -164,7 +165,7 @@ def test_collect_allows_a_delta_only_daemon(amxx_repo, daemon_repo, tmp_path):
 
 
 def test_default_schema_sequence_includes_retention_through_shot_events():
-    assert DEFAULT_SCHEMA_FILES[-18:] == (
+    assert DEFAULT_SCHEMA_FILES[-19:] == (
         "sql/migrate_015_flag_state_events.sql",
         "sql/migrate_016_life_events.sql",
         "sql/migrate_017_capture_clocks_and_assists.sql",
@@ -186,6 +187,7 @@ def test_default_schema_sequence_includes_retention_through_shot_events():
         "sql/migrate_031_shot_shooter_stance.sql",
         "sql/migrate_032_wave1_additive_fields.sql",
         "sql/migrate_033_wave2_streams.sql",
+        "sql/migrate_034_grenade_throw_events.sql",
     )
 
 

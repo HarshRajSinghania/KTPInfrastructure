@@ -211,3 +211,16 @@ def test_wave_markdown_says_why_when_no_wave_data():
     lines = analytics.wave_markdown(report)
     assert any("| a |" in line for line in lines)
     assert any("Duel stats: not available" in line for line in lines)
+
+
+def test_attach_wave_facts_grenade_throws_none_vs_zero():
+    players = [{"player_id": 1}, {"player_id": 2}]
+    analytics.attach_wave_facts(players, None, None, None)
+    assert players[0]["grenade_throws"] is None
+    analytics.attach_wave_facts(
+        players, None, None,
+        [{"player_id": 1, "grenade_throws": 6, "grenade_bursts_matched": 6,
+          "grenade_flight_avg": 3.1, "grenade_cooked": 4}],
+    )
+    assert players[0]["grenade_cooked"] == 4
+    assert players[1]["grenade_throws"] == 0 and players[1]["grenade_flight_avg"] is None
