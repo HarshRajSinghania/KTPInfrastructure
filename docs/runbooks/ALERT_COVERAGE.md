@@ -84,9 +84,11 @@ that never "failed", and alerts on state transitions only.
 | `ktp-reports.service` | yes, once the unit from `systemd/` is reinstalled; the live unit has none | no | a failing run alerts; `ktp-reports.timer` is not in `CRITICAL_TIMERS`, so a timer that stops firing does not. The journal only says `exit-code`; the cause is in `/var/log/ktp-report-service.log` |
 | `ktp-admin-bot.service` | **no** | **no** | **no — hole** |
 | `ktp-frag-diag-tail.service` | **no** | **no** | **no — hole** |
+| any other unit systemd calls `failed` | — | via `failed-unit:<name>` | yes — `systemctl --failed` is a producer for the health check since 2026-09-16 |
 
 Both uncovered units are long-lived daemons currently `active (running)`. If
-either exits, nothing on this box says so.
+either exits *cleanly* nothing says so; if either exits into `failed`, the
+`failed-unit:` producer now reports it once, by transition.
 
 ## Data server — timers and scheduled work
 

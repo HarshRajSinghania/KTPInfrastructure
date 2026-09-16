@@ -222,11 +222,14 @@ The state already exists, scattered:
 Nothing joins them, so no surface answers "what is broken right now, and since
 when."
 
-**Proposal.** A second `support-web` page, admin-tier, that reads those sources
-and renders open-versus-resolved with a time-since column. Read-only first: no
-acknowledgement workflow until the read-only version has proven it shows the
-right things. Sequence it after the trends page — same site, same auth, same
-tier gating, and the second one is mostly the first one's plumbing again.
+**Shipped, read-only, smaller than proposed.** Rather than joining five state
+files, the health check — the one thing that observes a transition — now keeps
+`since` and `detail` per item in its own state file, and gained a
+`failed-unit:<name>` producer from `systemctl --failed`, so a unit outside
+`CRITICAL_SERVICES` (the identity-reconcile case) is a tracked item too.
+`support-web` renders that file as "Open incidents" for the KTP tier:
+longest-open first, with time-since, and staleness as a state. No
+acknowledgement workflow until this has proven it shows the right things.
 
 The GitHub issue opened by the audit workflow covers this for drift
 specifically. This page covers the rest.

@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import relay, status as st, store, trends as tr
+from . import incidents as inc, relay, status as st, store, trends as tr
 from .config import settings
 from .poller import fleet
 from .reports import RateLimiter, ReportRejected, validate
@@ -91,6 +91,7 @@ def index(request: Request, tier: Tier = Depends(current_tier)):
             "server_labels": sorted(st.server_labels(doc)),
             "user": request.session.get(SESSION_NAME),
             "trends": load_trends() if "trends" in sections else None,
+            "incidents": inc.view(st.load(settings.health_state)) if "incidents" in sections else None,
         },
     )
 

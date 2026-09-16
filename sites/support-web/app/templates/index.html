@@ -297,7 +297,8 @@ h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.4px; }
 .cmdtable code { white-space: nowrap; }
 /* fleet trends — one sparkline per server; thin mark, warn days as dots plus a count */
 .trends { min-width: 720px; }
-.trends td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+.trends td.num, .incidents td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+.incidents { min-width: 640px; }
 .trends td.spark { padding-top: 6px; padding-bottom: 6px; }
 .spark svg { display: block; overflow: visible; }
 .spark polyline { fill: none; stroke: var(--blue-soft); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
@@ -958,6 +959,36 @@ footer .accent { color: var(--red); white-space: nowrap; }
       </div>
 
     </div>
+{% endif %}
+{% if 'incidents' in sections %}
+      <!-- ---- open incidents (KTP tier only) — the health check's state file, rendered ---- -->
+      <div class="sec-head sub"><h2>Open incidents</h2>
+        <span class="meta">{% if incidents.freshness == 'fresh' %}from the hourly data-server health check · updated {{ incidents.age }} ago{% else %}health check state unavailable{% endif %}</span></div>
+
+      <div class="panel">
+        <div class="head">Down right now <span class="pill">{% if incidents.freshness == 'fresh' %}{{ incidents.rows|length }}{% else %}?{% endif %}</span></div>
+        <div class="body scrollbox">
+{% if incidents.freshness != 'fresh' %}
+          <p class="hint">{{ incidents.message }}{% if incidents.updated %} — last written {{ incidents.updated }} ({{ incidents.age }} ago); the check itself may have stopped.{% endif %}</p>
+{% elif not incidents.rows %}
+          <p class="hint">Nothing down as of the last check.</p>
+{% else %}
+          <table class="cmdtable incidents">
+            <tr><td class="d">item</td><td class="d">detail</td><td class="d">since</td><td class="num">for</td></tr>
+{% for i in incidents.rows %}
+            <tr>
+              <td><code>{{ i.key }}</code></td>
+              <td class="d">{{ i.detail }}</td>
+              <td class="d">{% if i.since %}{{ i.since }}{% else %}<span class="none">before this check kept time</span>{% endif %}</td>
+              <td class="num">{{ i.age }}</td>
+            </tr>
+{% endfor %}
+          </table>
+          <div class="fineprint">Longest-open first. An item here has already been posted to Discord once, when it appeared;
+            nothing posts again while it stays down. This list is the answer to "is anyone on it."</div>
+{% endif %}
+        </div>
+      </div>
 {% endif %}
 {% if 'trends' in sections %}
       <!-- ---- fleet trends (KTP tier only — per-server performance is operational detail) ---- -->

@@ -154,6 +154,31 @@ for t in "${CRITICAL_TIMERS[@]}"; do
     fi
 done
 
+# ---- Any unit systemd itself calls failed ----
+# CRITICAL_SERVICES is an allowlist and is blind to a unit it does not name.
+# ktp-identity-reconcile.service failed on 2026-09-08; its OnFailure= alert
+# fired once, into a channel, and the unit sat failed for over a week with no
+# surface anywhere saying so. `systemctl --failed` is the box's own answer to
+# "what is broken right now" and costs nothing to ask. Units already reported
+# above by name are skipped so one fault is one item, not two.
+# FAILED_UNIT_IGNORE: space-separated globs for units whose failure is known
+# and accepted (an unused snap hook, say). Empty by default on purpose -- the
+# first run after deploy reports everything, once, and the operator decides.
+FAILED_UNIT_IGNORE="${FAILED_UNIT_IGNORE:-}"
+while read -r unit _; do
+    if [ -z "${unit:-}" ]; then continue; fi
+    skip=0
+    for svc in "${CRITICAL_SERVICES[@]}"; do
+        if [ "$unit" = "$svc" ]; then skip=1; fi
+    done
+    for pat in $FAILED_UNIT_IGNORE; do
+        case "$unit" in $pat) skip=1 ;; esac
+    done
+    if [ "$skip" -eq 0 ]; then
+        down+=("failed-unit:${unit}")
+    fi
+done <<< "$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' || true)"
+
 # Keyed on the UNIT's last exit, never on the file's mtime or the renderer's log.
 # Both of those go permanently quiet once the list stops changing — which is the
 # healthy steady state — so either would read as `stale` forever and get tuned out.
@@ -452,16 +477,45 @@ mapfile -t recovered < <(comm -13 "$TMP_CURR" "$TMP_PREV")
 # failed-POST run and the next run produces no alert for either edge (the
 # recovered state matches the stale prev). Sub-hour flap + relay outage
 # coinciding — rarer and less important than losing a persistent-down alert.
+# >>> ktp-health-state — extracted verbatim by tests/unit/test_health_state_since.py
+# health_state_document <down-json-array> <prev-state-json> <detail-json-object> <ts>
+# `since` is the one thing this file knows that nothing else does: the run that
+# first saw each item. Carried forward while the item stays down, stamped now
+# when it is new, dropped when it clears -- so a reader can answer "since when"
+# without the log, which is root-only. `detail` is the same text the Discord
+# line carries, kept so a page can show it. An older state file has no .since;
+# every current item then reads as since-now, once, and is right from then on.
+health_state_document() {
+    local down_json="$1" prev_json="$2" detail_json="$3" now="$4"
+    jq -n --argjson d "$down_json" --argjson prev "$prev_json" \
+          --argjson det "$detail_json" --arg ts "$now" '
+        ($prev.since // {}) as $was
+        | {updated_at: $ts,
+           down: $d,
+           since: ($d | map({key: ., value: ($was[.] // $ts)}) | from_entries),
+           detail: ($d | map({key: ., value: ($det[.] // "")}) | from_entries
+                    | with_entries(select(.value != "")))}'
+}
+# <<< ktp-health-state
+
 save_state() {
     mkdir -p "$(dirname "$STATE_FILE")"
-    local down_json
+    local down_json prev_json detail_json k
     if [ -s "$TMP_CURR" ]; then
         down_json=$(jq -R . < "$TMP_CURR" | jq -s .)
     else
         down_json='[]'
     fi
-    jq -n --argjson d "$down_json" --arg ts "$(ts)" \
-        '{updated_at: $ts, down: $d}' > "$STATE_FILE"
+    prev_json=$(jq -c . < "$STATE_FILE" 2>/dev/null || echo '{}')
+    detail_json='{}'
+    # Guarded: "${!detail[@]}" on an empty associative array is an unbound
+    # variable under `set -u` on bash < 4.4.
+    if [ ${#detail[@]} -gt 0 ]; then
+        for k in "${!detail[@]}"; do
+            detail_json=$(jq -c --arg k "$k" --arg v "${detail[$k]}" '. + {($k): $v}' <<< "$detail_json")
+        done
+    fi
+    health_state_document "$down_json" "$prev_json" "$detail_json" "$(ts)" > "$STATE_FILE"
 }
 
 # ---- Alert on transitions only ----
