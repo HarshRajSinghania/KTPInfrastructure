@@ -83,7 +83,7 @@ def client(tmp_path, monkeypatch):
 # the KTP privileges form offers.
 KTP_ONLY = ("Approval queue", "Request game server privileges", "Bot command hub",
             "/ops fleet-health", "Season captain", "Booking a server",
-            "AC review console", "Fleet trends")
+            "AC review console", "Fleet trends", "Open incidents")
 # Now genuinely one3-only. It used to render for KTP too, via an `or` that existed for
 # the "Your requests" panel sharing the row -- so KTP admins saw a form that is a strict
 # subset of their own (the privileges form's Group dropdown already covers 1.3 admin).
@@ -420,3 +420,33 @@ def test_public_page_opens_no_database_connection_for_trends(client, monkeypatch
     monkeypatch.setattr(m.store, "connect", lambda **kw: opened.append(kw) or (_ for _ in ()).throw(RuntimeError("no")))
     assert client().get("/").status_code == 200
     assert opened == []
+
+
+# --- open incidents: the health check's state file, KTP-only -----------------
+
+def test_incidents_render_for_ktp_from_the_health_state_file(client, monkeypatch, tmp_path):
+    import app.main as m
+    state = tmp_path / "health.json"
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state.write_text(json.dumps({
+        "updated_at": now,
+        "down": ["failed-unit:ktp-identity-reconcile.service"],
+        "since": {"failed-unit:ktp-identity-reconcile.service": "2026-09-08 09:01:53"},
+        "detail": {},
+    }))
+    import dataclasses
+    monkeypatch.setattr(m, "settings", dataclasses.replace(m.settings, health_state=str(state)))
+    html = client("111").get("/").text
+    assert "Open incidents" in html
+    assert "failed-unit:ktp-identity-reconcile.service" in html
+    assert "2026-09-08 09:01:53" in html
+
+
+def test_incidents_missing_state_file_is_unavailable_not_a_500(client, monkeypatch, tmp_path):
+    import app.main as m
+    import dataclasses
+    monkeypatch.setattr(m, "settings", dataclasses.replace(m.settings, health_state=str(tmp_path / "absent.json")))
+    r = client("111").get("/")
+    assert r.status_code == 200
+    assert "incident state is unavailable" in r.text
