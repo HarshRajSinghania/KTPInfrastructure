@@ -35,6 +35,8 @@ from pathlib import Path
 
 import ladder as L
 import match_binding as MB
+import performance as PF
+import dossier as DOSSIER
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -109,6 +111,102 @@ def actual_participants(key: str, fixtures, rosters):
     return bound
 
 
+def performance_scores(key: str, bindings) -> dict:
+    """{fixture_id: {player_id: blended z-score}} from the match reports.
+
+    Only fixtures already bound to a game match can be looked up, since the
+    report is keyed by the game match id. A fixture with no report, or a
+    report whose KTPR block is unavailable, simply yields nothing and that
+    match falls back to an even split -- never to zeros, which would read as
+    "everyone played badly".
+
+    Report player names are website ALIASES, so the join is
+    alias -> ktp.player.id. Verified on real S10 data: joining instead on
+    game_match_player.player_name (the in-game name, clan tag and all) hits
+    0 of 12; joining on alias hits 12 of 12.
+    """
+    if not bindings:
+        return {}
+    alias_to_id = {}
+    for row in fetch(key, "player", "id,alias"):
+        alias = PF.normalize_name(row.get("alias"))
+        if alias and alias not in alias_to_id:   # ambiguous alias -> resolve to nobody
+            alias_to_id[alias] = row["id"]
+        elif alias:
+            alias_to_id[alias] = None
+    wanted = {b["game_match_id"] for b in bindings.values() if b.get("game_match_id")}
+    if not wanted:
+        return {}
+    quoted = ",".join(f'"{m}"' for m in sorted(wanted))
+    reports = fetch(key, "match_report", "match_id,revision,payload",
+                    f"&match_id=in.({quoted})&order=revision")
+    latest = {r["match_id"]: r for r in reports}   # ordered by revision, last wins
+    out = {}
+    for fixture_id, binding in bindings.items():
+        report = latest.get(binding.get("game_match_id"))
+        if not report:
+            continue
+        by_alias = PF.components_by_alias(report.get("payload"))
+        scores = PF.player_scores(by_alias)
+        by_id = {alias_to_id[a]: z for a, z in scores.items()
+                 if alias_to_id.get(a) is not None}
+        if by_id:
+            out[fixture_id] = by_id
+    return out
+
+
+def upset_dossiers(key, upsets, bindings, matches):
+    """Markdown explaining each confident miss in terms of who played how.
+
+    Built for reporting regardless of whether performance weighting is
+    enabled: explaining a miss is useful even when the rating is not yet
+    using that signal. Degrades to nothing if the reports are unavailable.
+    """
+    if not upsets or not bindings:
+        return []
+    try:
+        scores_by_fixture = performance_scores(key, bindings)
+        names = {row["id"]: row.get("alias") for row in fetch(key, "player", "id,alias")}
+    except RuntimeError as exc:      # reporting must never break the run
+        print(f"  dossiers unavailable: {exc}")
+        return []
+    # The digest rows carry no rosters -- only the source matches do -- so
+    # rejoin by match_id rather than widening every row with two player lists.
+    rosters = {m["match_id"]: m for m in matches}
+    built = []
+    for row in upsets:
+        source = rosters.get(row["match_id"])
+        if not source:
+            continue
+        fixture_id = int(str(row["match_id"]).rsplit("-", 1)[-1])
+        context = {**row, "t1": source["t1"], "t2": source["t2"]}
+        d = DOSSIER.build(context, scores_by_fixture.get(fixture_id) or {}, names)
+        if d:
+            built.append(d)
+    return DOSSIER.render(built)
+
+
+def apply_performance(key, matches, bindings, strength):
+    """Attach per-player shares to each match that has a usable report.
+
+    Returns how many matches got them, so the digest can say what fraction of
+    the week was actually split by performance rather than evenly -- a number
+    that silently drops to zero if the report pipeline stalls is exactly the
+    kind of thing that should be visible, not assumed.
+    """
+    scores_by_fixture = performance_scores(key, bindings)
+    applied = 0
+    for m in matches:
+        fixture_id = int(str(m["match_id"]).rsplit("-", 1)[-1])
+        scores = scores_by_fixture.get(fixture_id)
+        if not scores:
+            continue
+        home, away = PF.match_shares(m["t1"], m["t2"], scores, strength)
+        m["shares"] = {**home, **away}
+        applied += 1
+    return applied
+
+
 def build_league_matches(key: str) -> tuple[list[dict], dict]:
     """Completed league matches with both scores, newest last."""
     bridge = load_bridge()
@@ -173,6 +271,7 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
             margin=abs(m["home_score"] - m["away_score"]),
             home_score=m["home_score"], away_score=m["away_score"],
             actual_roster=bool(binding),
+            shares=None,   # filled in by apply_performance() when enabled
             # Recorded but excluded from t1/t2 -- see match_binding._ringers.
             # Kept on the row, not just the aggregate count, so a specific
             # match's ringer(s) can be traced back from the digest/summary.
@@ -180,7 +279,7 @@ def build_league_matches(key: str) -> tuple[list[dict], dict]:
         ))
     out.sort(key=lambda m: m["when"])
     return out, dict(pending=pending, total_scheduled=len(matches_raw),
-                     rated_on_actual_participants=used_actual,
+                     rated_on_actual_participants=used_actual, bindings=played,
                      ringer_appearances=ringer_appearances)
 
 
@@ -254,7 +353,7 @@ def run(matches, model_factory):
                           correct=bool((raw > 0.5) == (m["y"] == 1.0)), margin=m["margin"]))
         preds.append(p)
         ys.append(m["y"])
-        model.update(m["t1"], m["t2"], m["y"])
+        model.update(m["t1"], m["t2"], m["y"], shares=m.get("shares"))
     return model, rows, (L.metrics(preds, ys) if preds else None)
 
 
@@ -289,6 +388,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--key", default=os.environ.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"))
     ap.add_argument("--holdout", type=int, default=10, help="matches held out for champion/challenger")
+    ap.add_argument("--use-performance", action="store_true",
+                    help="split each result between team-mates by their KTPR v2 performance "
+                         "in that match, instead of crediting everyone equally. OFF by default: "
+                         "the plumbing is in place but the weighting is untuned, and tuning it "
+                         "against a handful of matches would fit noise. Turn it on only once a "
+                         "held-out comparison says it helps.")
+    ap.add_argument("--performance-strength", type=float, default=PF.DEFAULT_STRENGTH,
+                    help="how hard performance tilts the split (0 = even, today's behaviour)")
     args = ap.parse_args()
     if not args.key:
         raise SystemExit("No key. Pass --key or set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.")
@@ -297,6 +404,14 @@ def main():
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"{len(matches)} completed league matches with rosters "
           f"({counts['pending']} scheduled/unplayed of {counts['total_scheduled']} total)")
+
+    counts["performance_weighted"] = 0
+    if args.use_performance:
+        counts["performance_weighted"] = apply_performance(
+            args.key, matches, counts.get("bindings") or {}, args.performance_strength)
+        print(f"performance weighting ON (strength {args.performance_strength}): "
+              f"{counts['performance_weighted']} of {len(matches)} matches split by KTPR; "
+              f"the rest fall back to an even split")
 
     if not matches:
         digest = [f"# MMR weekly digest -- {now}\n",
@@ -367,6 +482,7 @@ def main():
             winner = r["home"] if r["y"] == 1.0 else r["away"]
             digest.append(f"| {r['home']} vs {r['away']} | {lean} | "
                           f"{max(r['p_home'], 1-r['p_home']):.0%} | {winner} | {r['margin']} |")
+        digest += upset_dossiers(args.key, upsets[-8:], counts.get("bindings") or {}, matches)
     if cand:
         digest += ["", "## Tuning check (champion vs challengers)\n",
                    f"Each variant trained on all but the last {args.holdout} matches, then scored "
