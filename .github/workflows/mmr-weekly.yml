@@ -79,20 +79,47 @@ jobs:
             --label "mmr,automated" \
             --repo "${{ github.repository }}"
 
-      - name: Commit updated ratings
+      # main is a protected branch: it requires status checks that a bot push
+      # can never satisfy, so `git push` there fails with GH006 no matter who
+      # holds the token. The first real scheduled run (2026-09-14) died exactly
+      # there, after generating its ratings correctly. Rating history is DATA,
+      # not source, so it goes to its own unprotected branch and stops trying
+      # to walk through a door that is locked by design.
+      #
+      # Isolated clone rather than switching branches in the workspace: the
+      # checkout still holds the run's outputs, and a branch switch underneath
+      # them is how you lose a week's work to a stale index.
+      - name: Publish ratings to the data branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd scripts/mmr
-          # Pre-season / no completed matches: nothing is rated, so no file.
-          if [ ! -f ratings_current.json ]; then
-            echo "no ratings produced (no completed matches yet) -- nothing to commit"
+          set -e
+          RATINGS="$GITHUB_WORKSPACE/scripts/mmr/ratings_current.json"
+          if [ ! -f "$RATINGS" ]; then
+            echo "no ratings produced (no completed matches yet) -- nothing to publish"
             exit 0
           fi
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          cd "$RUNNER_TEMP"
+          rm -rf mmr-pub
+          if git clone --quiet --depth 1 --branch mmr-ratings "$REMOTE" mmr-pub 2>/dev/null; then
+            echo "appending to the existing mmr-ratings history"
+          else
+            echo "mmr-ratings does not exist yet -- creating it"
+            mkdir mmr-pub
+            cd mmr-pub
+            git init -q
+            git checkout -q -b mmr-ratings
+            git remote add origin "$REMOTE"
+            cd "$RUNNER_TEMP"
+          fi
+          cd mmr-pub
+          cp "$RATINGS" ratings_current.json
           git add ratings_current.json
-          if git diff --cached --quiet; then
-            echo "ratings unchanged this week -- nothing to commit"
+          if git rev-parse --verify HEAD >/dev/null 2>&1 && git diff --cached --quiet; then
+            echo "ratings unchanged this week -- nothing to publish"
             exit 0
           fi
-          git config user.name "ktp-mmr-bot"
-          git config user.email "noreply@github.com"
-          git commit -m "MMR weekly update $(date -u +%Y-%m-%d)"
-          git push
+          git -c user.name="ktp-mmr-bot" -c user.email="noreply@github.com"               commit -q -m "MMR ratings $(date -u +%Y-%m-%d)"
+          git push --quiet origin mmr-ratings
+          echo "published to the mmr-ratings branch"
