@@ -109,7 +109,10 @@ provision/LAN-PC-OWNER-SETUP.html
 provision/LAN-PC-OWNER-SETUP.pdf
 
 # @hostinfo
+# why: gitignore patterns are case-sensitive on Linux, so COSTS.md alone leaves the
+# real filename (costs.md) stageable in a checkout like /opt/ktp-infra.
 COSTS.md
+costs.md
 
 # @privacy
 # why: maps every player's SteamID to every alias they have used. Not a
