@@ -18,8 +18,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import relay, status as st, store
+from . import relay, status as st, store, trends as tr
 from .config import settings
+from .poller import fleet
 from .reports import RateLimiter, ReportRejected, validate
 from .season import current_season
 from .tickets import Group, Level, Status, TransitionError, may_request, transition
@@ -79,17 +80,41 @@ def client_ip(request: Request) -> str:
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, tier: Tier = Depends(current_tier)):
     doc = st.load(settings.public_json)
+    sections = visible_sections(tier)
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             "tier": tier.value,
-            "sections": visible_sections(tier),
+            "sections": sections,
             "status": st.view(doc),
             "server_labels": sorted(st.server_labels(doc)),
             "user": request.session.get(SESSION_NAME),
+            "trends": load_trends() if "trends" in sections else None,
         },
     )
+
+
+def load_trends() -> list[dict] | None:
+    """The admin trends table, or None when the data cannot be read.
+
+    None renders as "unavailable", never as an empty fleet and never as a 500:
+    a grant missing on the database must cost the page one panel, not the page.
+    Only fetched for a tier that will render it, so a public request never opens
+    a database connection for a section it cannot see.
+    """
+    try:
+        conn = store.connect(**settings.db_kwargs)
+    except Exception:
+        log.exception("trends: database connect failed")
+        return None
+    try:
+        return tr.shape(store.telemetry_days(conn), fleet())
+    except Exception:
+        log.exception("trends: query or shaping failed")
+        return None
+    finally:
+        conn.close()
 
 
 @app.get("/healthz")
