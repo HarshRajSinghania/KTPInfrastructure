@@ -115,7 +115,12 @@ jobs:
           fi
           cd mmr-pub
           cp "$RATINGS" ratings_current.json
+          # The website-ready payload rides along so the operator step is a
+          # fetch plus one command, with no need to rerun the ladder.
+          PAYLOAD="$GITHUB_WORKSPACE/scripts/mmr/mmr_openskill_payload.json"
+          [ -f "$PAYLOAD" ] && cp "$PAYLOAD" mmr_openskill_payload.json
           git add ratings_current.json
+          [ -f mmr_openskill_payload.json ] && git add mmr_openskill_payload.json
           if git rev-parse --verify HEAD >/dev/null 2>&1 && git diff --cached --quiet; then
             echo "ratings unchanged this week -- nothing to publish"
             exit 0
