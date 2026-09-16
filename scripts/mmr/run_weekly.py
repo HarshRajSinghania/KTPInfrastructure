@@ -36,6 +36,7 @@ from pathlib import Path
 import ladder as L
 import match_binding as MB
 import performance as PF
+import dossier as DOSSIER
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -152,6 +153,37 @@ def performance_scores(key: str, bindings) -> dict:
         if by_id:
             out[fixture_id] = by_id
     return out
+
+
+def upset_dossiers(key, upsets, bindings, matches):
+    """Markdown explaining each confident miss in terms of who played how.
+
+    Built for reporting regardless of whether performance weighting is
+    enabled: explaining a miss is useful even when the rating is not yet
+    using that signal. Degrades to nothing if the reports are unavailable.
+    """
+    if not upsets or not bindings:
+        return []
+    try:
+        scores_by_fixture = performance_scores(key, bindings)
+        names = {row["id"]: row.get("alias") for row in fetch(key, "player", "id,alias")}
+    except RuntimeError as exc:      # reporting must never break the run
+        print(f"  dossiers unavailable: {exc}")
+        return []
+    # The digest rows carry no rosters -- only the source matches do -- so
+    # rejoin by match_id rather than widening every row with two player lists.
+    rosters = {m["match_id"]: m for m in matches}
+    built = []
+    for row in upsets:
+        source = rosters.get(row["match_id"])
+        if not source:
+            continue
+        fixture_id = int(str(row["match_id"]).rsplit("-", 1)[-1])
+        context = {**row, "t1": source["t1"], "t2": source["t2"]}
+        d = DOSSIER.build(context, scores_by_fixture.get(fixture_id) or {}, names)
+        if d:
+            built.append(d)
+    return DOSSIER.render(built)
 
 
 def apply_performance(key, matches, bindings, strength):
@@ -450,6 +482,7 @@ def main():
             winner = r["home"] if r["y"] == 1.0 else r["away"]
             digest.append(f"| {r['home']} vs {r['away']} | {lean} | "
                           f"{max(r['p_home'], 1-r['p_home']):.0%} | {winner} | {r['margin']} |")
+        digest += upset_dossiers(args.key, upsets[-8:], counts.get("bindings") or {}, matches)
     if cand:
         digest += ["", "## Tuning check (champion vs challengers)\n",
                    f"Each variant trained on all but the last {args.holdout} matches, then scored "
