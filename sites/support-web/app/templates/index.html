@@ -295,6 +295,15 @@ h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.4px; }
 .cmdtable tr:last-child td { border-bottom: none; }
 .cmdtable td:last-child { text-align: right; padding-right: 0; }
 .cmdtable code { white-space: nowrap; }
+/* fleet trends — one sparkline per server; thin mark, warn days as dots plus a count */
+.trends { min-width: 720px; }
+.trends td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+.trends td.spark { padding-top: 6px; padding-bottom: 6px; }
+.spark svg { display: block; overflow: visible; }
+.spark polyline { fill: none; stroke: var(--blue-soft); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.spark circle { fill: var(--red-soft); }
+.trends .warn { color: var(--red-soft); }
+.trends .none { color: var(--faint); }
 .cmdtable .d { color: var(--dim); }
 .cmdtable.fit { min-width: 0; }
 .alias { color: var(--faint); font-size: 0.72rem; white-space: nowrap; }
@@ -949,6 +958,38 @@ footer .accent { color: var(--red); white-space: nowrap; }
       </div>
 
     </div>
+{% endif %}
+{% if 'trends' in sections %}
+      <!-- ---- fleet trends (KTP tier only — per-server performance is operational detail) ---- -->
+      <div class="sec-head sub"><h2>Fleet trends</h2>
+        <span class="meta">p50 FPS per server, last 30 days · daily rollup from the telemetry aggregator</span></div>
+
+      <div class="panel">
+        <div class="head">Performance <span class="pill">{% if trends is none %}unavailable{% else %}{{ trends|length }} servers{% endif %}</span></div>
+        <div class="body scrollbox">
+{% if trends is none %}
+          <p class="hint">Trend data could not be read. The status grid above is unaffected — this panel reads a different table.</p>
+{% else %}
+          <table class="cmdtable trends">
+            <tr><td></td><td class="d">30 days</td><td class="num">latest</td><td class="num">min</td><td class="num">max</td><td class="num">spikes</td><td class="num">warn days</td></tr>
+{% for t in trends %}
+            <tr>
+              <td><b>{{ t.label }}</b></td>
+              <td class="spark">{% if t.points %}<svg width="160" height="28" viewBox="0 0 160 28" role="img" aria-label="{{ t.label }} p50 FPS over {{ t.days }} days"><title>{{ t.label }}: {{ t.min|round(1) }}–{{ t.max|round(1) }} FPS p50 over {{ t.days }} days</title><polyline points="{{ t.points }}"/>{% for x, y in t.warn_points %}<circle cx="{{ x }}" cy="{{ y }}" r="3"/>{% endfor %}</svg>{% else %}<span class="none">no data</span>{% endif %}</td>
+              <td class="num">{% if t.latest is not none %}{{ t.latest|round(1) }}{% else %}—{% endif %}</td>
+              <td class="num">{% if t.min is not none %}{{ t.min|round(1) }}{% else %}—{% endif %}</td>
+              <td class="num">{% if t.max is not none %}{{ t.max|round(1) }}{% else %}—{% endif %}</td>
+              <td class="num">{{ t.spikes }}</td>
+              <td class="num{% if t.warn_days %} warn{% endif %}">{{ t.warn_days }}</td>
+            </tr>
+{% endfor %}
+          </table>
+          <div class="fineprint">A warn day is one the aggregator flagged on FPS or spikes against that server's own baseline;
+            it is drawn as a dot and counted in the last column. A flat line is a healthy server — the vertical scale
+            never narrows below 2 FPS, so sub-FPS noise does not read as a cliff.</div>
+{% endif %}
+        </div>
+      </div>
 {% endif %}
   </section>
 

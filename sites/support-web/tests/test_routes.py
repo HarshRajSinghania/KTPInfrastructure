@@ -83,7 +83,7 @@ def client(tmp_path, monkeypatch):
 # the KTP privileges form offers.
 KTP_ONLY = ("Approval queue", "Request game server privileges", "Bot command hub",
             "/ops fleet-health", "Season captain", "Booking a server",
-            "AC review console")
+            "AC review console", "Fleet trends")
 # Now genuinely one3-only. It used to render for KTP too, via an `or` that existed for
 # the "Your requests" panel sharing the row -- so KTP admins saw a form that is a strict
 # subset of their own (the privileges form's Group dropdown already covers 1.3 admin).
@@ -386,3 +386,37 @@ def test_every_offered_category_is_actually_accepted(client):
     for cat in sorted(offered)[:3]:            # rate limit is 3/hour
         r = c.post("/api/report", data=form(category=cat))
         assert r.status_code == 200, (cat, r.text)
+
+
+# --- fleet trends: KTP-only, and the page survives its data source ---------
+
+def test_trends_render_for_ktp_from_the_daily_rollup(client, monkeypatch):
+    import app.main as m
+    from datetime import date
+    monkeypatch.setattr(m.store, "telemetry_days", lambda conn, days=30: [
+        {"server_endpoint": "74.91.126.55:27015", "day": date(2026, 9, d),
+         "fps_p50_today": 999.0 - d, "spike_total_today": d, "warn_fps": int(d == 3),
+         "warn_spikes": 0} for d in (1, 2, 3)])
+    html = client("111").get("/").text
+    assert "Fleet trends" in html
+    assert "<polyline points=" in html          # Dallas 1 has a series
+    assert "no data" in html                    # every other fleet instance has none
+    assert "aria-label=\"Dallas 1 p50 FPS over 3 days\"" in html
+
+
+def test_trends_query_failure_costs_one_panel_not_the_page(client):
+    """The fixture's fake connection has no cursor, so the real query raises.
+    That must render as unavailable, not as a 500 and not as an empty fleet."""
+    r = client("111").get("/")
+    assert r.status_code == 200
+    assert "Trend data could not be read" in r.text
+    assert "Fleet trends" in r.text
+    assert "<polyline" not in r.text
+
+
+def test_public_page_opens_no_database_connection_for_trends(client, monkeypatch):
+    import app.main as m
+    opened = []
+    monkeypatch.setattr(m.store, "connect", lambda **kw: opened.append(kw) or (_ for _ in ()).throw(RuntimeError("no")))
+    assert client().get("/").status_code == 200
+    assert opened == []
