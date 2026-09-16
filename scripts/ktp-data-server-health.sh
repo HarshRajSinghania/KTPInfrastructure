@@ -377,6 +377,54 @@ while read -r kb path; do
     printf '%s|%s|LOG|%s|%s\n' "$now_ts" "$now_epoch" "$path" "$kb" >> "$DISK_HISTORY" || true
 done <<< "$log_top"
 
+# ---- Capture health: is the stats daemon rejecting what the fleet sends? ----
+# ktp_capture_health is written on every match half and, until this block, was
+# read by nothing on a schedule. Between 2026-09-02 and 09-08 the daemon rejected
+# 22-34% of every frag the fleet sent and one match on Dallas 1 lost 87% of its
+# events; all of it was recorded in full and found six days later by someone
+# looking for a trends dataset. Frags feed player rating. A daemon restart on
+# 09-08 fixed it -- nothing here would have said so either.
+#
+# Per event type over a trailing window, as an integer percentage the latch can
+# hold. Post-restart normal is 0 for nine types and under 1% for frag (transit
+# loss). Warn at 5%, clear at 2%, and only once enough events have arrived that
+# a percentage means anything: one rejected frag in a ten-frag warmup is 10%.
+#
+# >>> ktp-capture-loss — extracted verbatim by tests/unit/test_health_capture_loss.py
+CAPTURE_LOSS_WARN_PCT="${CAPTURE_LOSS_WARN_PCT:-5}"
+CAPTURE_LOSS_CLEAR_PCT="${CAPTURE_LOSS_CLEAR_PCT:-2}"
+CAPTURE_LOSS_MIN_RECEIVED="${CAPTURE_LOSS_MIN_RECEIVED:-200}"
+CAPTURE_LOSS_WINDOW_HOURS="${CAPTURE_LOSS_WINDOW_HOURS:-24}"
+# stdin:  event_type<TAB>received<TAB>rejected, one row per type (mysql -N -B).
+# stdout: event_type<TAB>pct<TAB>received<TAB>rejected for rows at or above the
+#         floor, pct rounded to an integer so `latched` can compare it.
+capture_loss_rows() {
+    awk -F'\t' -v min="$CAPTURE_LOSS_MIN_RECEIVED" '
+        NF >= 3 && $2+0 >= min { printf "%s\t%d\t%d\t%d\n", $1, int(100*$3/$2 + 0.5), $2, $3 }'
+}
+# <<< ktp-capture-loss
+
+# Root socket, same auth as the migrations and ktp-ac-retention.sh. A failed
+# query is its own down item rather than a silent skip: mysql itself being down
+# is already CRITICAL_SERVICES, but a dropped table or a revoked grant would
+# otherwise read as "capture is clean" forever.
+if capture_rows=$(mysql hlstatsx -N -B -e "
+        SELECT event_type, SUM(daemon_received), SUM(daemon_rejected)
+        FROM ktp_capture_health
+        WHERE event_time >= NOW() - INTERVAL ${CAPTURE_LOSS_WINDOW_HOURS} HOUR
+        GROUP BY event_type" 2>/dev/null); then
+    while IFS=$'\t' read -r etype pct received rejected; do
+        if [ -z "${etype:-}" ]; then continue; fi
+        echo "[$now_ts] capture ${etype}: ${rejected}/${received} rejected (${pct}%) over ${CAPTURE_LOSS_WINDOW_HOURS}h"
+        key="capture-loss:${etype}"
+        if latched "$key" "$pct" "$CAPTURE_LOSS_WARN_PCT" "$CAPTURE_LOSS_CLEAR_PCT"; then
+            down+=("$key"); detail[$key]="${pct}% of ${received} ${etype} events rejected by the daemon in the last ${CAPTURE_LOSS_WINDOW_HOURS}h"
+        fi
+    done <<< "$(printf '%s\n' "$capture_rows" | capture_loss_rows)"
+else
+    down+=("capture-loss=query-failed")
+fi
+
 # ---- Build sorted lists for set comparison ----
 # curr.list: sorted, deduplicated set of currently-down items
 # prev.list: read at the top of the run, because the disk checks latch on it

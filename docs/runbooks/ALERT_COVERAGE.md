@@ -131,6 +131,7 @@ Cron-scheduled work is outside both mechanisms entirely:
 | HLStatsX ingest stalls | yes | yes | `hlstatsx-ingest-monitor.py` |
 | Tier 2 suite goes quiet | yes | yes | `ktp-tier2-heartbeat.sh` |
 | Perf spike signatures | yes | yes | `ktp-profile-aggregator` → MySQL → Discord, `posted_alert` dedup |
+| Stats daemon rejecting the fleet's capture events | yes | yes | `ktp-data-server-health.sh`, `capture-loss:<event_type>` — trailing 24h per event type from `ktp_capture_health`, warn 5% / clear 2%, floor 200 received. Added after the 09-02→09-08 loss went six days unnoticed |
 
 ---
 
