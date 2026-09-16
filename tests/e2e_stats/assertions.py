@@ -952,7 +952,13 @@ def check_damage_ledger(db, *, emitted: int) -> dict:
     rows = db.count("SELECT COUNT(*) FROM ktp_damage_events")
     violations = db.count(
         "SELECT COUNT(*) FROM ktp_damage_events "
-        "WHERE damage_capped > 100 OR damage_capped > damage"
+        "WHERE damage_capped > 100 OR damage_capped > damage "
+        # Wave 1 (migration 032): applied damage is clamp(before - after, 0,
+        # damage) on the producer, so it can never exceed damage or go
+        # negative, and a hit never raises health. NULL (pre-wave-1 producer)
+        # compares false and is not a violation.
+        "OR damage_applied > damage OR damage_applied < 0 "
+        "OR health_after > health_before"
     )
     if emitted == 0:
         return {"code": "damage_ledger", "status": "not_exercised", "emitted": 0,
@@ -962,8 +968,9 @@ def check_damage_ledger(db, *, emitted: int) -> dict:
     if violations > 0:
         return {"code": "damage_ledger", "status": "pipeline", "emitted": emitted,
                 "rows": rows, "cap_violations": violations, "detail":
-                f"{violations} row(s) with damage_capped > 100 or "
-                f"damage_capped > damage — the cap is a plugin-side "
+                f"{violations} row(s) with damage_capped > 100, "
+                f"damage_capped > damage, damage_applied outside 0..damage, or "
+                f"health_after > health_before — the cap is a plugin-side "
                 f"MIN(damage, 100), so a violation here is a real defect in "
                 f"that logic, not a coverage gap. Should never happen "
                 f"regardless of weapon or hitzone."}
