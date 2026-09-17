@@ -52,6 +52,7 @@ from scripts.flag_fights import (  # noqa: E402
     build_entries_shadow,
     build_flag_fight_shadow,
 )
+from scripts.highlight_windows import build_highlight_windows  # noqa: E402
 from scripts.flag_swing import (  # noqa: E402
     build_flag_swing_shadow,
 )
@@ -91,7 +92,7 @@ from scripts.side_splits import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 15  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time; 15: aim shadow (computed placement + AC on-hit precision)
+SCHEMA_VERSION = 16  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time; 15: aim shadow (computed placement + AC on-hit precision); 16: shadow_explorations.highlight_windows (key moments ranked on flag_swing)
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -2015,6 +2016,11 @@ def build_report(
         flag_fights.get("players"),
         flag_swing.get("players"),
     )
+    highlight_windows = build_highlight_windows(
+        flag_swing.get("timeline"),
+        players_public,
+        source_status=flag_swing.get("status"),
+    )
     if source_mode == "replay":
         objective_pressure["status"] = "timed_metrics_suppressed"
         objective_pressure["players"] = []
@@ -2156,6 +2162,7 @@ def build_report(
             "recap_speed": recap_speed,
             "flag_swing": flag_swing,
             "ktpr_v2": ktpr_v2,
+            "highlight_windows": highlight_windows,
             "weapon_engagement": build_weapon_engagement_shadow(
                 frag_context if frag_context is not None else frag_timeline,
                 engagement_config,
