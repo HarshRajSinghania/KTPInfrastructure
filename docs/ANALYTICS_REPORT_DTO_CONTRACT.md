@@ -13,6 +13,7 @@ meaning is not obvious from their names.
 | `analytics-report-dto-v1.1.0` | 10 | Adds `in_game_result`, `player_halves`, `lane_analytics.depth_profiles.units`; always carries `ratings.ktpr_v2.display_scale` |
 | `analytics-report-dto-v1.2.0` | 11 | Adds `kill_streaks`, `weapon_sides`, `duels_by_side`, `player_classes`, `players[].best_streak`, `player_halves.rows[].side` and `.best_streak`; cap breaks in `player_halves` take the producer half |
 | `analytics-report-dto-v1.3.0` | 12 | Adds `score`, `points_per_minute`, `grenade_kills`, `grenade_damage`, `grenade_damage_taken` to `teams[]`, `players[]` and `player_halves.rows[]`; `map_profiles` (season aggregate) adds `kills_per_minute` and `points_per_minute` |
+| `analytics-report-dto-v1.4.0` | 16 | Adds top-level `key_moments`: the match's highlight windows ranked on flag swing, names only |
 
 Minor versions only add keys. A consumer that matches the
 `analytics-report-dto-v1.` prefix keeps working; one that needs the new blocks
@@ -134,6 +135,31 @@ already carries `weapon` per line and has been public since 2026-09-09 --
 filter it to the three grenade weapon names for a kill-location map, using
 the same attacker/victim coordinates and team/half/game_time every other
 frag vector carries.
+
+## `key_moments` (v1.4.0)
+
+`definition: highlight_windows_v1`. The match's highlight windows: clusters of
+kills and flag events on the `flag_swing_v1` timeline, ranked by the momentum
+they moved. A coarse, derived list — at most `parameters.top_n` windows — and
+the single source every consumer should read: the report page's key-moments
+section, the HLTV viewer's deep links (a window's `start` is the game time the
+anchor converts to demo time), the post-match message's "best moment", and the
+clip pipeline. Re-ranking on the site means the site and the report disagree.
+
+It is not the event stream. The per-event timeline stays private; this block
+carries no ids, no positions, and no per-kill detail.
+
+| Key | Meaning |
+|---|---|
+| `status` | `available` / `unavailable` (flag swing unavailable or timeline empty) |
+| `definition`, `definition_version`, `parameters` | Ranker settings as run: `merge_gap`, `pad_before`/`pad_after`, `min_len`/`max_len`, `max_cameras`, `multikill_bonus`, `objective_bonus`, `top_n`; `ranker: flag_swing_v1`; `clock: producer_game_time` |
+| `windows_total` | Windows found before `top_n` truncation |
+| `windows[]` | `rank`; `half`; `start`, `end`, `duration`, `peak_at` (game seconds within the half); `kinds` (`frag`, `flag`); `events`; `swing` (sum of \|delta\|), `peak_delta`, `score` (swing plus bonuses); `summary` (e.g. `4k by SILVERBACK cK-, 5 flag events`); `involved[]` |
+| `windows[].involved[]` | Up to `max_cameras` players by `name`, `team`, `involvement` (kills 1.0, deaths 0.4). The first entry is the window's dominant killer and the camera the reel uses. **Empty for flag-only windows** — flag events carry no player ids; consumers fall back to a director view. |
+
+Ranking is on uncalibrated `flag_swing_v1` deltas, so order is comparative,
+not absolute. A window longer than `max_len` is centred on its peak event
+rather than truncated from the start.
 
 ## Reports built before schema 11
 
