@@ -750,7 +750,8 @@ def test_migrate_applies_every_registered_migration_in_order(tmp_path, monkeypat
     rc, built = _import_main(tmp_path, monkeypatch,
                              "--migrate", "--database", "hlstatsx_lan")
     assert rc == 0
-    expected = [score.MIGRATION, score.PRODUCER_MIGRATION, score.DEMO_PRODUCER_MIGRATION]
+    expected = [score.MIGRATION, score.PRODUCER_MIGRATION, score.DEMO_PRODUCER_MIGRATION,
+                score.DEMO_SETTLEMENT_MIGRATION]
     assert built[0]["migrations"] == expected
     assert score.MIGRATIONS == tuple(expected)
     assert all(path.is_file() for path in score.MIGRATIONS)

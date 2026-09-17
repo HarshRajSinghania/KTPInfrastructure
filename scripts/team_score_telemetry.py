@@ -40,7 +40,9 @@ MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "migrate_023_team_scor
 PRODUCER_MIGRATION = MIGRATION.with_name("migrate_032_team_score_producer.sql")
 DEMO_PRODUCER_MIGRATION = MIGRATION.with_name("migrate_033_team_score_demo_producer.sql")
 # A file in sql/ is inert until it is listed here: apply_migrations walks only this tuple.
-MIGRATIONS = (MIGRATION, PRODUCER_MIGRATION, DEMO_PRODUCER_MIGRATION)
+DEMO_SETTLEMENT_MIGRATION = MIGRATION.with_name("migrate_034_team_score_demo_settlement.sql")
+MIGRATIONS = (MIGRATION, PRODUCER_MIGRATION, DEMO_PRODUCER_MIGRATION,
+              DEMO_SETTLEMENT_MIGRATION)
 
 _DATABASE = re.compile(r"^[A-Za-z0-9_]+$")
 _REQUIRED_KEYS = frozenset({
