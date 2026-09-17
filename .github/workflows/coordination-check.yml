@@ -1,9 +1,14 @@
 name: Coordination check
 on: pull_request
 
+# This repo hosts the reusable check (see coordination-check-reusable.yml) and is also
+# one of its callers, so it calls the local copy by path. A ./ reference always runs the
+# version on the PR's own head, which is what lets a change to the check be tested in the
+# PR that makes it -- the other callers pin a SHA and cannot.
 jobs:
   check:
-    uses: andsmit9/ktp-coordination/.github/workflows/check.yml@main
+    uses: ./.github/workflows/coordination-check-reusable.yml
     with:
       repo_name: KTPInfrastructure
-    secrets: inherit
+    secrets:
+      COORD_DEPLOY_KEY: ${{ secrets.COORD_DEPLOY_KEY }}
