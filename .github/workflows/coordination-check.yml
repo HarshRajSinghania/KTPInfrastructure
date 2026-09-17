@@ -1,5 +1,12 @@
 name: Coordination check
-on: pull_request
+# `edited` is not optional here. The default pull_request types are opened, synchronize
+# and reopened, so `github.event.pull_request.body` is frozen at trigger time -- adding
+# the required Coordination-Workstream line does NOT re-run the check, and a manual
+# re-run replays the same stale payload. Without `edited` the only remedy for a red
+# check is an empty commit, and nothing on the PR says so.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 # This repo hosts the reusable check (see coordination-check-reusable.yml) and is also
 # one of its callers, so it calls the local copy by path. A ./ reference always runs the
