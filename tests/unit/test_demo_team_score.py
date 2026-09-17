@@ -189,7 +189,10 @@ def test_import_sql_shape():
     assert "CREATE TEMPORARY TABLE `ktp_demo_ts_row_stage`" in sql
     assert "INSERT INTO `ktp_team_score_ingest_manifests`" in sql
     assert "INSERT INTO `ktp_team_score_observations`" in sql
-    assert "ON DUPLICATE KEY UPDATE id=id" in sql and "ON DUPLICATE KEY UPDATE match_id=match_id" in sql
+    assert "ON DUPLICATE KEY UPDATE id=id" in sql
+    assert "ON DUPLICATE KEY UPDATE `ktp_team_score_ingest_manifests`.`match_id`" in sql
+    # the spelling that cannot execute -- guards the 1052 regression, not the wording
+    assert "ON DUPLICATE KEY UPDATE match_id=match_id" not in sql
     assert "KTPHudObserver" not in sql, "never write under the HUD producer"
     prod = dts._sql_text(dts.PRODUCER)
     assert sql.count(prod) >= 36 + 9, "every row and manifest carries our producer"

@@ -425,7 +425,9 @@ CREATE TEMPORARY TABLE `ktp_demo_ts_skip` AS
 INSERT INTO `ktp_team_score_ingest_manifests` ({mcols})
   SELECT {mcols} FROM `ktp_demo_ts_manifest_stage`
   WHERE match_id NOT IN (SELECT match_id FROM `ktp_demo_ts_skip`)
-  ON DUPLICATE KEY UPDATE match_id=match_id;
+  -- qualified: unqualified here resolves against both the target and the
+  -- SELECT's table, and MySQL rejects that as ambiguous (1052).
+  ON DUPLICATE KEY UPDATE `ktp_team_score_ingest_manifests`.`match_id` = `ktp_team_score_ingest_manifests`.`match_id`;
 INSERT INTO `ktp_team_score_observations` ({rcols})
   SELECT {rcols} FROM `ktp_demo_ts_row_stage`
   WHERE match_id NOT IN (SELECT match_id FROM `ktp_demo_ts_skip`)
