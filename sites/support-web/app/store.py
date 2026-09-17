@@ -119,3 +119,24 @@ def open_tickets(conn) -> list[dict]:
             """
         )
         return list(cur.fetchall())
+
+
+def telemetry_days(conn, days: int = 30) -> list[dict]:
+    """One row per server per day from the aggregator's daily rollup.
+
+    Read-only, and the only thing on this site that reads a table it does not
+    own: `support_web` needs SELECT on `ktp_telemetry_baselines`, which is a
+    grant, not code. The page degrades to "unavailable" until it has it.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT server_endpoint, day, fps_p50_today, spike_total_today,
+                   warn_fps, warn_spikes
+            FROM ktp_telemetry_baselines
+            WHERE day >= CURDATE() - INTERVAL %s DAY
+            ORDER BY server_endpoint, day
+            """,
+            (days,),
+        )
+        return list(cur.fetchall())

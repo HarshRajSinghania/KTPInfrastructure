@@ -58,7 +58,7 @@ def visible_sections(tier: Tier) -> list[str]:
     if tier is Tier.ONE3:
         sections.append("request_one3")
     if tier is Tier.KTP:
-        sections += ["request_ktp", "commands", "console", "tickets"]
+        sections += ["request_ktp", "commands", "console", "tickets", "incidents", "trends"]
     return sections
 
 

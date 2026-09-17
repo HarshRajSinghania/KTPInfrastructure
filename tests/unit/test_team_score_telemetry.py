@@ -746,13 +746,16 @@ def test_import_sql_writes_the_hud_observer_as_producer_of_both_ledgers(tmp_path
     assert sql.count(producer) == len(score._stage_rows(parsed.observations)) + len(parsed.manifests)
 
 
-def test_migrate_applies_023_then_the_producer_migration(tmp_path, monkeypatch):
+def test_migrate_applies_every_registered_migration_in_order(tmp_path, monkeypatch):
     rc, built = _import_main(tmp_path, monkeypatch,
                              "--migrate", "--database", "hlstatsx_lan")
     assert rc == 0
-    assert built[0]["migrations"] == [score.MIGRATION, score.PRODUCER_MIGRATION]
-    assert score.MIGRATIONS == (score.MIGRATION, score.PRODUCER_MIGRATION)
+    expected = [score.MIGRATION, score.PRODUCER_MIGRATION, score.DEMO_PRODUCER_MIGRATION]
+    assert built[0]["migrations"] == expected
+    assert score.MIGRATIONS == tuple(expected)
     assert all(path.is_file() for path in score.MIGRATIONS)
+    # an unregistered file in sql/ is applied by nothing, which is how 033 shipped inert
+    assert set(score.MIGRATION.parent.glob("migrate_*.sql")) == set(score.MIGRATIONS)
 
 
 def test_explicit_migration_paths_replace_the_defaults_in_order(tmp_path, monkeypatch):

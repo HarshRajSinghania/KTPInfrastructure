@@ -146,51 +146,15 @@ jobs:
 
       - name: Decide whether a human needs to look
         id: gate
-        env:
-          RESTART_DRIFT: ${{ steps.restart_drift.outcome }}
+        # The decision lives in scripts/fleet-audit-gate.sh so it can be tested
+        # (tests/unit/test_fleet_audit_gate.py). Its restart-drift leg is a
+        # state transition, not a level: the .example running ahead of the fleet
+        # is DIVERGES every week until a redeploy, and that was waking the model
+        # every Monday to be told "known, no action". The gate keeps its baseline
+        # in /var/lib beside the audit's own state file.
         run: |
           set -euo pipefail
-          reasons=""
-
-          # Repo-vs-fleet drift that is NEW since the last run. Steady-state drift
-          # is not news -- the fleet carries 22 known baremetal items every week,
-          # and triaging those every Monday is how an alert becomes wallpaper.
-          #
-          # The audit prints no delta at all on the very first run against a
-          # fresh state file, so new_count is 0 and this leg stays quiet. That
-          # is deliberate: the alternative is a first run that triages every
-          # long-standing item at once. The monitor-fault check below does not
-          # depend on state and still fires on run one.
-          new_count="$(sed -n 's/.*Repo-drift delta vs last run: +\([0-9]\+\) new.*/\1/p' audit-stdout.txt | head -1)"
-          new_count="${new_count:-0}"
-          # An `if`, not `cond && assign`: the AND-list returns 1 when the
-          # condition is false, and under `set -e` that ends the step here --
-          # scoring a clean fleet as a pass. Same shape as the two set -e bugs
-          # in docs/runbooks/FLEET_MANAGEMENT_SCRIPTS.md.
-          if [ "$new_count" -gt 0 ]; then
-            reasons="${reasons}${new_count} new repo-drift item(s). "
-          fi
-
-          # The LinuxGSM monitor patch. These three states are the ones that cost a
-          # match window before: a monitor that kills live servers, and a monitor
-          # that cannot parse and therefore does nothing at all, silently.
-          if grep -qE 'parse=BROKEN|parse=MISSING|oldtype=armed' audit-report.md; then
-            reasons="${reasons}LinuxGSM monitor patch fault. "
-          fi
-
-          # A host that could not be reached is a failure, not a skip.
-          if [ "$RESTART_DRIFT" != "success" ]; then
-            reasons="${reasons}Restart-script drift or an unreachable host. "
-          fi
-
-          if [ -n "$reasons" ]; then
-            echo "needs_triage=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs_triage=false" >> "$GITHUB_OUTPUT"
-            reasons="Nothing new."
-          fi
-          echo "reason=$reasons" >> "$GITHUB_OUTPUT"
-          echo "$reasons"
+          bash scripts/fleet-audit-gate.sh | tee -a "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         if: always()

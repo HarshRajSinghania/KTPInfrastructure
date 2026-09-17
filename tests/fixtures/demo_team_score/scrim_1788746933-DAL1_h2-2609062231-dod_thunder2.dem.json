@@ -1,0 +1,165 @@
+{
+"file": "scrim_1788746933-DAL1_h2-2609062231-dod_thunder2.dem",
+"players": [
+{
+"deaths": 24,
+"id": "STEAM_0:1:123285",
+"kills": 25,
+"lifespan": {
+"avg": "40s 171ms 412us 963ns",
+"max": "1m 55s 729ms 980us 469ns",
+"min": "15s 595ms 977us 783ns"
+},
+"name": "NoGo ! Khoi",
+"score": 10,
+"team": "allies"
+},
+{
+"deaths": 28,
+"id": "STEAM_0:0:773012",
+"kills": 28,
+"lifespan": {
+"avg": "32s 875ms 107us 337ns",
+"max": "1m 37s 25ms 985us 718ns",
+"min": "9s 898ms 986us 816ns"
+},
+"name": "[cK] w a n k e h ^ ^",
+"score": 9,
+"team": "allies"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:103022502",
+"kills": 20,
+"lifespan": {
+"avg": "39s 937ms 383us 422ns",
+"max": "1m 23s 841ms 3us 417ns",
+"min": "2s 393ms 5us 371ns"
+},
+"name": "nogo ! yagu",
+"score": 7,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:0:14782058",
+"kills": 30,
+"lifespan": {
+"avg": "1m 233ms 62us 744ns",
+"max": "1m 51s 155ms 990us 601ns",
+"min": "12s 724ms 975us 586ns"
+},
+"name": "nogo ! redmagnum",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:9833731",
+"kills": 37,
+"lifespan": {
+"avg": "54s 862ms 316us 894ns",
+"max": "1m 55s 16ms 998us 291ns",
+"min": "20s 214ms 50us 293ns"
+},
+"name": "Bausch that's a ngogo!",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:1:67913",
+"kills": 24,
+"lifespan": {
+"avg": "57s 136ms 249us 118ns",
+"max": "2m 3s 19ms 958us 496ns",
+"min": "11s 574ms 5us 127ns"
+},
+"name": "nogo ! yayme <8{~",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:99398",
+"kills": 34,
+"lifespan": {
+"avg": "37s 966ms 961us 200ns",
+"max": "1m 28s 253ms 997us 803ns",
+"min": "10s 79ms 956us 54ns"
+},
+"name": "[$] cory?",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:0:24858784",
+"kills": 18,
+"lifespan": {
+"avg": "34s 588ms 468us 279ns",
+"max": "1m 25s 807ms 998us 658ns",
+"min": "9s 548ms 950us 196ns"
+},
+"name": "[$] nacho-",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 33,
+"id": "STEAM_0:0:3906550",
+"kills": 20,
+"lifespan": {
+"avg": "27s 812ms 464us 994ns",
+"max": "1m 26s 574ms 157us 715ns",
+"min": "6s 361ms 999us 512ns"
+},
+"name": "[$] sTarK x_0",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:0:1794",
+"kills": 14,
+"lifespan": {
+"avg": "31s 209ms 792us 582ns",
+"max": "1m 15s 49ms 11us 230ns",
+"min": "14s 138ms 977us 51ns"
+},
+"name": "[$] billbsod",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:3656742",
+"kills": 22,
+"lifespan": {
+"avg": "43s 695ms 964us 647ns",
+"max": "2m 12s 890ms 991us 211ns",
+"min": "7s 317ms 16us 601ns"
+},
+"name": "[$] nomistizzle.iwa <8{~",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 33,
+"id": "STEAM_0:1:454573929",
+"kills": 21,
+"lifespan": {
+"avg": "27s 731ms 748us 693ns",
+"max": "1m 7s 904ms 495us 239ns",
+"min": "8s 892ms 28us 809ns"
+},
+"name": "[$] allen c;",
+"score": 1,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 236,
+"axis": 82
+}
+}

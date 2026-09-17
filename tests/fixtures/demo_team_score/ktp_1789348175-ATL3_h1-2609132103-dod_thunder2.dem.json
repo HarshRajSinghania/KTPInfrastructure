@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789348175-ATL3_h1-2609132103-dod_thunder2.dem",
+"players": [
+{
+"deaths": 28,
+"id": "STEAM_0:1:1679",
+"kills": 24,
+"lifespan": {
+"avg": "31s 361ms 59us 780ns",
+"max": "1m 2s 260ms 986us 328ns",
+"min": "14s 94ms 360us 351ns"
+},
+"name": "[ o_o ] Las1K64`",
+"score": 8,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:2845",
+"kills": 13,
+"lifespan": {
+"avg": "44s 245ms 150us 358ns",
+"max": "1m 45s 322ms 326us 660ns",
+"min": "15s 893ms 5us 371ns"
+},
+"name": "[ o_o ] maddvibEzZz",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:1:527469",
+"kills": 16,
+"lifespan": {
+"avg": "35s 110ms 908us 790ns",
+"max": "1m 19s 618ms 652us 344ns",
+"min": "10s 765ms 14us 649ns"
+},
+"name": "[ o_o ] XZIST",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:813301",
+"kills": 10,
+"lifespan": {
+"avg": "48s 288ms 32us 168ns",
+"max": "5m 32s 640ms 75us 683ns",
+"min": "9s 692ms 993us 164ns"
+},
+"name": "[ o_o ] topknot",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:30958790",
+"kills": 24,
+"lifespan": {
+"avg": "45s 447ms 64us 486ns",
+"max": "1m 36s 72ms 21us 484ns",
+"min": "10s 818ms 847us 656ns"
+},
+"name": "[ o_o ] zG.-",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:16434063",
+"kills": 19,
+"lifespan": {
+"avg": "49s 250ms 405us 447ns",
+"max": "2m 8s 299ms 987us 793ns",
+"min": "13s 760ms 9us 766ns"
+},
+"name": "[ o_o ] bro_Oks",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:0:21657644",
+"kills": 28,
+"lifespan": {
+"avg": "57s 123ms 275us 756ns",
+"max": "1m 50s 675ms 48us 828ns",
+"min": "18s 898ms 10us 254ns"
+},
+"name": "rV! DkZ!",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:0:21503998",
+"kills": 17,
+"lifespan": {
+"avg": "48s 64ms 925us 420ns",
+"max": "1m 38s 847ms 991us 944ns",
+"min": "10s 765ms 14us 649ns"
+},
+"name": "rV! y0y1",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:33426612",
+"kills": 28,
+"lifespan": {
+"avg": "43s 812ms 421us 715ns",
+"max": "1m 41s 62ms 500us",
+"min": "10s 466ms 979us 981ns"
+},
+"name": "rV! Agucho!",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 16,
+"id": "STEAM_0:1:67430667",
+"kills": 14,
+"lifespan": {
+"avg": "1m 529ms 392us 18ns",
+"max": "2m 46s 603ms 27us 343ns",
+"min": "10s 765ms 14us 649ns"
+},
+"name": "rV! Chuave1",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 12,
+"id": "STEAM_0:1:30157303",
+"kills": 25,
+"lifespan": {
+"avg": "1m 23s 692ms 511us 925ns",
+"max": "3m 5s 62ms 988us 282ns",
+"min": "19s 366ms 943us 360ns"
+},
+"name": "rV! duendeee;",
+"score": 1,
+"team": "axis"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:0:415724266",
+"kills": 23,
+"lifespan": {
+"avg": "47s 676ms 70us 440ns",
+"max": "2m 14s 967ms 895us 508ns",
+"min": "10s 818ms 847us 656ns"
+},
+"name": "rV! Pocho",
+"score": 0,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 24,
+"axis": 80
+}
+}

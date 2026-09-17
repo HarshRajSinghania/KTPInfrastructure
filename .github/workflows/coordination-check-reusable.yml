@@ -1,0 +1,111 @@
+name: Coordination check (reusable)
+
+# Authored by andsmit9. It lives HERE, not in andsmit9/ktp-coordination, for one reason:
+# GitHub resolves a private repo's reusable workflow only for repos under the SAME owner,
+# so `uses: andsmit9/ktp-coordination/...` failed at STARTUP in every caller -- no steps,
+# no logs, and the run named after the file instead of this `name:`. That is not a
+# permissions setting; there is nothing to grant. This repo is public, so it resolves.
+# The coordination STATE stays private in andsmit9/ktp-coordination and is still reached
+# by the deploy-key clone below.
+#
+# Called by a thin workflow in each participating code repo:
+#
+#   name: Coordination check
+#   on: pull_request
+#   jobs:
+#     check:
+#       uses: afraznein/KTPInfrastructure/.github/workflows/coordination-check-reusable.yml@<sha>
+#       with:
+#         repo_name: KTPAMXX
+#       secrets:
+#         COORD_DEPLOY_KEY: ${{ secrets.COORD_DEPLOY_KEY }}
+#
+# Pin a SHA, not @main: a moving ref means whatever lands next runs on every PR across
+# every caller. Pass the one secret explicitly rather than `secrets: inherit`, which hands
+# a gate the whole secret set.
+#
+# Requires an Actions secret COORD_DEPLOY_KEY in the calling repo: the private half of a
+# read-only SSH deploy key added to andsmit9/ktp-coordination. See that repo's README.
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        required: true
+        type: string
+    secrets:
+      COORD_DEPLOY_KEY:
+        required: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract workstream slug from PR body
+        id: slug
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          SLUG=$(printf '%s\n' "$PR_BODY" | grep -oP '(?<=^Coordination-Workstream: ).+' | head -1 || true)
+          if [ -z "$SLUG" ]; then
+            echo "::error::PR body is missing a 'Coordination-Workstream: <slug>' line. See the ktp-coordination repo README."
+            exit 1
+          fi
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Load coordination repo deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.COORD_DEPLOY_KEY }}
+
+      - name: Clone coordination repo
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git clone --depth 1 git@github.com:andsmit9/ktp-coordination.git coord
+
+      - name: Verify workstream exists
+        id: state
+        run: |
+          STATE="coord/state/${{ steps.slug.outputs.slug }}.md"
+          if [ ! -f "$STATE" ]; then
+            echo "::error::Unknown workstream '${{ steps.slug.outputs.slug }}' — no $STATE in ktp-coordination."
+            exit 1
+          fi
+          echo "path=$STATE" >> "$GITHUB_OUTPUT"
+
+      - name: Verify workstream is not closed
+        run: |
+          status=$(awk 'NR==1&&$0!="---"{exit} NR>1&&$0=="---"{exit} NR>1&&index($0,"status:")==1{sub("status:[ ]*","");print;exit}' "${{ steps.state.outputs.path }}")
+          case "${status:-active}" in
+            done)
+              echo "::error::Workstream '${{ steps.slug.outputs.slug }}' is closed (status: done). Bump it to a new version (/bump) or open a new slug, then re-tag this PR."
+              exit 1 ;;
+            superseded)
+              succ=$(awk 'NR==1&&$0!="---"{exit} NR>1&&$0=="---"{exit} NR>1&&index($0,"superseded_by:")==1{sub("superseded_by:[ ]*","");print;exit}' "${{ steps.state.outputs.path }}")
+              echo "::error::Workstream '${{ steps.slug.outputs.slug }}' is superseded by '${succ}'. Tag the PR with the live version's slug."
+              exit 1 ;;
+          esac
+
+      - name: Verify this repo is in scope
+        run: |
+          if ! grep -qE "^\| *${{ inputs.repo_name }} *\|" "${{ steps.state.outputs.path }}"; then
+            echo "::error::Repo '${{ inputs.repo_name }}' is not listed in workstream '${{ steps.slug.outputs.slug }}''s Repos in scope table."
+            exit 1
+          fi
+
+      - name: Verify any Blocked-by PR is merged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          row=$(grep -E "^\| *${{ inputs.repo_name }} *\|" "${{ steps.state.outputs.path }}" | head -1)
+          blocked_by=$(echo "$row" | awk -F'|' '{print $6}' | xargs)
+          if [ -n "$blocked_by" ] && [ "$blocked_by" != "—" ] && [ "$blocked_by" != "-" ]; then
+            for pr_url in $blocked_by; do
+              merged=$(gh pr view "$pr_url" --json merged --jq .merged 2>/dev/null || echo "unknown")
+              if [ "$merged" != "true" ]; then
+                echo "::error::Blocked by $pr_url, which is not merged yet (status: $merged)."
+                exit 1
+              fi
+            done
+          fi

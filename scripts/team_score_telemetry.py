@@ -38,7 +38,9 @@ MAX_OFFICIAL_ROWS = 100_000
 MAX_RAW_ROW_BYTES = 64 * 1024
 MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "migrate_023_team_score_observations.sql"
 PRODUCER_MIGRATION = MIGRATION.with_name("migrate_032_team_score_producer.sql")
-MIGRATIONS = (MIGRATION, PRODUCER_MIGRATION)
+DEMO_PRODUCER_MIGRATION = MIGRATION.with_name("migrate_033_team_score_demo_producer.sql")
+# A file in sql/ is inert until it is listed here: apply_migrations walks only this tuple.
+MIGRATIONS = (MIGRATION, PRODUCER_MIGRATION, DEMO_PRODUCER_MIGRATION)
 
 _DATABASE = re.compile(r"^[A-Za-z0-9_]+$")
 _REQUIRED_KEYS = frozenset({

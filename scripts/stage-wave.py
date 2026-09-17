@@ -20,10 +20,14 @@ holding it true):
      gate never sees a partial stage to object to.
 
   2. EXPECTED-MD5 ASSERTION. `--expect <basename>=<md5>` refuses to stage an
-     artifact whose local md5 doesn't match what you reviewed. KTPAMXX and
-     KTPMatchHandler bake a per-minute build timestamp, so an accidental rebuild
-     silently changes the shipped md5 -- this catches it before it reaches 24
-     instances. ("Verify by md5, not banner.")
+     artifact whose local md5 doesn't match what you reviewed. A plugin built by
+     its OWN repo's compile.sh bakes a per-minute KTP_BUILD_TIME, so an accidental
+     rebuild in a new minute silently changes the shipped md5 -- measured on
+     KTPMatchHandler 526da23, two builds a minute apart differ by 72,498 bytes and
+     by one byte of size. KTPAMXX's IN-TREE plugins (stats_logging, admin) bake no
+     stamp and rebuild bit-for-bit, but --expect still earns its keep there,
+     because a DIFFERENT amxxpc also changes the bytes and no commit pins the
+     compiler. ("Verify by md5, not banner.")
 
   3. WAVE-TIME RUNNER GATE. `--expect-runner <basename>=<md5>` refuses to stage
      unless the Tier-2 runner already holds the matching KTP_TEST_MODE build.
@@ -118,8 +122,10 @@ import argparse
 import importlib.util
 import os
 import re
+import struct
 import subprocess
 import sys
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
@@ -156,6 +162,41 @@ SWAP_GLOBS = [
     "serverfiles/dod/addons/ktpamx/modules/*.new",
     "serverfiles/dod/addons/ktpamx/plugins/*.new",
 ]
+
+
+# KTP_BUILD_TIME as compile.sh writes it: `date -u +%Y-%m-%dT%H:%MZ`.
+STAMP_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\dZ")
+
+
+def build_stamp(path):
+    """KTP_BUILD_TIME baked into a compiled .amxx, or None.
+
+    The one value that makes an artifact rebuildable, and the one that cannot be
+    recovered after the fact: `.amxx` md5s are not reproducible across minutes,
+    so an artifact whose stamp went unrecorded cannot be rebuilt to its own md5
+    even from the exact commit. Read it while the file is in hand.
+
+    `strings` finds nothing here -- the AMX image is zlib-compressed inside the
+    AMXX container, and Pawn stores a string one character per 32-bit cell. So:
+    inflate each plugin section, then take the low byte of every cell.
+    """
+    try:
+        b = open(path, "rb").read()
+        magic, _ver, n = struct.unpack_from("<IHB", b, 0)
+        if magic != 0x414D5858:
+            return None
+        off = 7
+        for _ in range(n):
+            _cell, _image, disksize, _mem, offs = struct.unpack_from("<BIIII", b, off)
+            off += 17
+            raw = zlib.decompress(b[offs:offs + disksize])
+            text = "".join(chr(c) if 32 <= c < 127 else "\0" for c in raw[0::4])
+            m = STAMP_RE.search(text)
+            if m:
+                return m.group()
+    except Exception:
+        return None
+    return None
 
 
 def parse_base_pins(values):
@@ -333,6 +374,12 @@ def pull_live(host_keys, artifacts, dest, port_filter=None):
     provenance -- a rollback copy whose identity rests on a sidecar note is one
     lost note away from being unusable.
 
+    Also reads each outgoing artifact's baked KTP_BUILD_TIME, which is the only
+    moment it is cheap: the file is already local and md5-verified. Without it a
+    lost copy is unrebuildable, because the stamp feeds back in as
+    KTP_BUILD_TIME_OVERRIDE. Returned as a 6th tuple field, None for artifacts
+    that bake no stamp (modules, the engine, a pre-override build).
+
     Returns (saved, errors). An instance whose live file is ABSENT is recorded
     as an error, not skipped: "there was nothing to back up" and "the probe
     looked in the wrong place" are indistinguishable from a silent skip.
@@ -369,7 +416,7 @@ def pull_live(host_keys, artifacts, dest, port_filter=None):
                     if h.hexdigest() != md5:
                         errs.append((hk, p, a.basename, f"md5 mismatch after download: {h.hexdigest()} != {md5}"))
                         continue
-                    got.append((hk, p, a.basename, md5, local))
+                    got.append((hk, p, a.basename, md5, local, build_stamp(local)))
                 except Exception as e:
                     errs.append((hk, p, a.basename, repr(e)))
         sftp.close()
@@ -680,17 +727,28 @@ def main():
     if args.pull_live:
         print(f"Pulling LIVE artifacts to {args.pull_live} before staging...")
         saved, pull_errs = pull_live(host_keys, artifacts, args.pull_live, port_filter)
-        for hk, p, base, md5, local in saved:
-            print(f"  [{hk}:{p}] {base} md5 {md5} -> {os.path.basename(local)}")
+        for hk, p, base, md5, local, stamp in saved:
+            print(f"  [{hk}:{p}] {base} md5 {md5} built {stamp or 'NO STAMP'} "
+                  f"-> {os.path.basename(local)}")
         if pull_errs:
             print("FATAL: could not preserve every live artifact:", file=sys.stderr)
             for hk, p, base, err in pull_errs:
                 print(f"  [{hk}:{p or '-'}] {base or '-'}: {err}", file=sys.stderr)
             sys.exit("Aborting -- NOTHING STAGED. A stage with no rollback copy is one-way.")
-        distinct = sorted({m for _, _, _, m, _ in saved})
+        distinct = sorted({m for _, _, _, m, _, _ in saved})
         print(f"  preserved {len(saved)} file(s), {len(distinct)} distinct md5(s).")
         if len(distinct) > len(artifacts):
             print("  ** The target instances are NOT uniform -- more distinct md5s than artifacts. **")
+        # One stamp per basename is the uniform case. More than one means the
+        # instances are running different builds of it, which the md5 count
+        # above may miss when two builds share a stamp.
+        outgoing = {}
+        for _, _, base, _, _, stamp in saved:
+            outgoing.setdefault(base, set()).add(stamp)
+        for base, stamps in sorted(outgoing.items()):
+            if len(stamps) > 1:
+                print(f"  ** {base}: {len(stamps)} distinct outgoing build stamps: "
+                      f"{sorted(s or 'NO STAMP' for s in stamps)} **")
         print()
 
     # ---- Stage + mode-match ----
@@ -714,7 +772,16 @@ def main():
     try:
         ledger_path = ledger.record_wave(
             [{"basename": a.basename, "md5": a.md5, "remote_dir": a.remote_dir,
-              "version": row_versions.get(a.basename), "base": bases.get(a.basename)}
+              "version": row_versions.get(a.basename), "base": bases.get(a.basename),
+              # The stamp the INCOMING build baked, read from the file being
+              # staged. Pairs with `base`: together they are the two inputs that
+              # reproduce this md5, and neither is recoverable later.
+              "build_time": build_stamp(a.local_path),
+              # And what it replaces, so a rollback can rebuild the outgoing
+              # build too. Only populated when --pull-live ran.
+              "replaces_build_time": sorted(
+                  {s for _, _, b, _, _, s in (saved if args.pull_live else [])
+                   if b == a.basename and s}) or None}
              for a in artifacts],
             hosts=host_keys, targets=len(targets), narrowed=port_filter is not None)
         print(f"\nWave recorded: {ledger_path}")

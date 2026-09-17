@@ -42,6 +42,8 @@ class Settings:
 
     public_json: str = "/var/lib/support-web/public.json"
     detail_json: str = "/var/lib/support-web/detail.json"
+    # Written hourly by ktp-data-server-health.sh (root); world-readable.
+    health_state: str = "/var/lib/ktp-data-server-health.json"
 
     @property
     def oauth_configured(self) -> bool:
@@ -86,6 +88,7 @@ def load() -> Settings:
         one3_admin_ids=_ids(env("SUPPORT_ONE3_ADMIN_IDS")),
         public_json=env("SUPPORT_PUBLIC_JSON") or Settings.public_json,
         detail_json=env("SUPPORT_DETAIL_JSON") or Settings.detail_json,
+        health_state=env("SUPPORT_HEALTH_STATE") or Settings.health_state,
     )
 
 

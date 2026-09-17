@@ -177,15 +177,47 @@ class OpenSkill:
             return p
         return damped_probability(p, self.evidence(t1, t2), self.damping)
 
-    def update(self, t1, t2, y):
+    def _apply(self, players, rated, shares):
+        """Write back one side, splitting its mu movement by `shares`.
+
+        The library's own `weights` argument is NOT used, deliberately.
+        Measured against openskill 6.2.0: it is a binary step at w > 1.0, not
+        a proportional scale -- weights of 0.0, 0.25, 0.5 and 1.0 all produce
+        byte-identical output, and 1.1, 1.5 and 2.5 likewise produce one
+        identical larger result. Building on that would silently collapse
+        performance weighting into "above 1.0 or not" while still looking
+        like it worked, which is worse than not shipping it.
+
+        So the redistribution happens here instead, where it is ours and
+        testable: take the mu movement the model produced for the side, and
+        split that SAME total between team-mates in proportion to their
+        shares. Because shares have mean 1, the side's aggregate movement is
+        preserved exactly -- performance decides who gets the credit, never
+        how much credit the result is worth. That separation is what keeps
+        this from turning into a second, unearned confidence knob.
+
+        Sigma is taken from the model untouched: uncertainty is about having
+        played, not about how well.
+        """
+        for pid, new in zip(players, rated):
+            old = self.r[pid]
+            delta = new.mu - old.mu
+            share = 1.0 if not shares else float(shares.get(pid, 1.0))
+            self.r[pid] = self.m.rating(mu=old.mu + delta * share, sigma=new.sigma)
+            self.games[pid] += 1
+
+    def update(self, t1, t2, y, shares=None):
+        """`shares` optionally splits each side's update between team-mates.
+
+        {player_id: share}, mean 1 within a side (see performance.team_shares).
+        Without it every team-mate absorbs the result identically, which is
+        why two players in the SAME match cannot be told apart by win/loss
+        alone -- they won and lost together.
+        """
         a, b = [self.r[p] for p in t1], [self.r[p] for p in t2]
         na, nb = self.m.rate([a, b], ranks=[1, 2] if y == 1.0 else [2, 1])
-        for p, r in zip(t1, na):
-            self.r[p] = r
-            self.games[p] += 1
-        for p, r in zip(t2, nb):
-            self.r[p] = r
-            self.games[p] += 1
+        self._apply(t1, na, shares)
+        self._apply(t2, nb, shares)
 
     def widen_at_season_boundary(self, factor=1.5):
         """Carry mu forward across a season, but widen sigma back up (capped
