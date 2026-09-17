@@ -1,0 +1,165 @@
+{
+"file": "12man_1.3-6744-ATL1_h1-2609070000-dod_armory_b6.dem",
+"players": [
+{
+"deaths": 27,
+"id": "STEAM_0:1:16151757",
+"kills": 28,
+"lifespan": {
+"avg": "34s 247ms 819us 83ns",
+"max": "1m 34s 467ms 41us 15ns",
+"min": "9s 243ms 41us 993ns"
+},
+"name": "SeanIsProbablyRope",
+"score": 8,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:1:25429845",
+"kills": 33,
+"lifespan": {
+"avg": "42s 450ms 582us 753ns",
+"max": "1m 19s 538ms 452us 148ns",
+"min": "8s 432ms 983us 399ns"
+},
+"name": "Savage¬",
+"score": 7,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:1:19091457",
+"kills": 32,
+"lifespan": {
+"avg": "40s 125ms 148us 773ns",
+"max": "1m 45s 807ms 983us 399ns",
+"min": "14s 796ms 20us 508ns"
+},
+"name": "dbo father",
+"score": 7,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:1:68153627",
+"kills": 32,
+"lifespan": {
+"avg": "36s 113ms 221us 345ns",
+"max": "2m 3s 718ms 994us 141ns",
+"min": "5s 841ms 64us 453ns"
+},
+"name": "100％berty!",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:443810",
+"kills": 22,
+"lifespan": {
+"avg": "41s 336ms 799us 621ns",
+"max": "2m 2s 783ms 81us 55ns",
+"min": "5s 813ms 964us 844ns"
+},
+"name": "kroD-",
+"score": 5,
+"team": "allies"
+},
+{
+"deaths": 28,
+"id": "STEAM_0:0:947716100",
+"kills": 32,
+"lifespan": {
+"avg": "32s 316ms 166us 318ns",
+"max": "1m 37s 136ms 47us 364ns",
+"min": "5s 768ms 66us 406ns"
+},
+"name": "d0dnk",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:10230748",
+"kills": 28,
+"lifespan": {
+"avg": "30s 801ms 21us 452ns",
+"max": "1m 39s 654ms 968us 261ns",
+"min": "6s 119ms 18us 555ns"
+},
+"name": "icyHOT ~ hildebrand?",
+"score": 7,
+"team": "axis"
+},
+{
+"deaths": 36,
+"id": "STEAM_0:1:32793027",
+"kills": 33,
+"lifespan": {
+"avg": "24s 412ms 550us 184ns",
+"max": "57s 565ms 2us 442ns",
+"min": "4s 707ms 153us 320ns"
+},
+"name": "SILVERBACK cK-",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:1:748805",
+"kills": 23,
+"lifespan": {
+"avg": "29s 556ms 613us 922ns",
+"max": "2m 27s 364ms 990us 234ns",
+"min": "8s 127ms 14us 160ns"
+},
+"name": "PAINTRAIN",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 28,
+"id": "STEAM_0:1:6941519",
+"kills": 19,
+"lifespan": {
+"avg": "31s 308ms 371us 708ns",
+"max": "1m 2s 968ms 17us 579ns",
+"min": "6s 865ms 966us 797ns"
+},
+"name": "b. enerydods",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:151174768",
+"kills": 18,
+"lifespan": {
+"avg": "30s 473ms 935us 34ns",
+"max": "1m 13s 208ms 7us 813ns",
+"min": "5s 174ms 11us 231ns"
+},
+"name": "HUGE in Japan",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:531977444",
+"kills": 27,
+"lifespan": {
+"avg": "30s 882ms 766us 231ns",
+"max": "1m 12s 776ms 977us 539ns",
+"min": "5s 263ms 977us 51ns"
+},
+"name": "SILVERBACK shmaltz",
+"score": 0,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 185,
+"axis": 41
+}
+}
