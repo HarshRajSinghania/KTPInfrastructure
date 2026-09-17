@@ -1,0 +1,165 @@
+{
+"file": "scrim_1788746783-CHI1_h2-2609062228-dod_lennon5_b1.dem",
+"players": [
+{
+"deaths": 25,
+"id": "STEAM_0:1:3612473",
+"kills": 33,
+"lifespan": {
+"avg": "39s 957ms 807us 981ns",
+"max": "1m 44s 117ms 607us 116ns",
+"min": "16s 962ms 951us 660ns"
+},
+"name": "dod",
+"score": 15,
+"team": "allies"
+},
+{
+"deaths": 19,
+"id": "STEAM_0:1:8832199",
+"kills": 36,
+"lifespan": {
+"avg": "52s 951ms 73us 455ns",
+"max": "2m 30s 459ms 14us 892ns",
+"min": "6s 66ms 40us 39ns"
+},
+"name": "dicE[: :]Gorilla[bc]",
+"score": 13,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:6155141",
+"kills": 49,
+"lifespan": {
+"avg": "43s 483ms 570us 928ns",
+"max": "1m 49s 551ms 86us 426ns",
+"min": "13s 778ms 15us 136ns"
+},
+"name": "dicE[: :]m00cat :D",
+"score": 12,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:0:1547256",
+"kills": 27,
+"lifespan": {
+"avg": "32s 757ms 863us 538ns",
+"max": "1m 56s 348ms 403us 930ns",
+"min": "3s 72ms 998us 47ns"
+},
+"name": "dicE[: :]stealthlol",
+"score": 12,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:1:76802393",
+"kills": 46,
+"lifespan": {
+"avg": "36s 807ms 213us 374ns",
+"max": "1m 18s 39ms 1us 465ns",
+"min": "6s 66ms 40us 39ns"
+},
+"name": "dicE[: :]ddyeL!fe",
+"score": 11,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:1:281787",
+"kills": 19,
+"lifespan": {
+"avg": "31s 530ms 663us 251ns",
+"max": "1m 44s 220ms 947us 266ns",
+"min": "6s 129ms 28us 320ns"
+},
+"name": "dicE[: :]warchyld[dd]",
+"score": 10,
+"team": "allies"
+},
+{
+"deaths": 35,
+"id": "STEAM_0:1:749715",
+"kills": 20,
+"lifespan": {
+"avg": "23s 894ms 176us 586ns",
+"max": "1m 17s 438ms 995us 362ns",
+"min": "7s 468ms 2us 320ns"
+},
+"name": "b.   тωὶﮐт",
+"score": 7,
+"team": "axis"
+},
+{
+"deaths": 40,
+"id": "STEAM_0:1:1213993",
+"kills": 21,
+"lifespan": {
+"avg": "20s 595ms 808us 29ns",
+"max": "58s 405ms 944us 824ns",
+"min": "4s 382ms 995us 605ns"
+},
+"name": "b.   w1llawaw",
+"score": 6,
+"team": "axis"
+},
+{
+"deaths": 36,
+"id": "STEAM_0:1:8076501",
+"kills": 37,
+"lifespan": {
+"avg": "24s 240ms 593us 543ns",
+"max": "57s 398ms 925us 782ns",
+"min": "4s 491ms 27us 832ns"
+},
+"name": "berty!",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 33,
+"id": "STEAM_0:0:14081672",
+"kills": 34,
+"lifespan": {
+"avg": "30s 549ms 227us 97ns",
+"max": "1m 53s 863ms 876us 342ns",
+"min": "7s 504ms 28us 320ns"
+},
+"name": "chi",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 37,
+"id": "STEAM_0:0:24850",
+"kills": 18,
+"lifespan": {
+"avg": "23s 641ms 611us 735ns",
+"max": "46s 789ms 978us 27ns",
+"min": "9s 206ms 237us 793ns"
+},
+"name": "2010 wiz khalifa",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 37,
+"id": "STEAM_0:0:9167552",
+"kills": 17,
+"lifespan": {
+"avg": "22s 725ms 231us 773ns",
+"max": "51s 846ms 984us 864ns",
+"min": "3s 879ms 28us 320ns"
+},
+"name": "asdf m1",
+"score": 2,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 700,
+"axis": 167
+}
+}

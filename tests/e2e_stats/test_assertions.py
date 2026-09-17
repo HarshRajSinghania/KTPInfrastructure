@@ -1201,3 +1201,34 @@ def test_context_clear_without_post_probe_still_fails_on_table_loss():
     )
     assert verdict["status"] == "pipeline"
     assert "Each table must reconcile exactly" in verdict["detail"]
+
+
+class DamageLedgerDb(FakeDb):
+    """Schema pinned before or after migration 032; records the violations query."""
+
+    def __init__(self, *, has_wave1: bool):
+        super().__init__()
+        self._has_wave1 = has_wave1
+        self.violations_query = None
+
+    def count(self, query):
+        if "information_schema.TABLES" in query:
+            return 1
+        if "information_schema.COLUMNS" in query:
+            return 1 if self._has_wave1 else 0
+        if "damage_capped > 100" in query:
+            self.violations_query = query
+            return 0
+        return 5
+
+
+def test_damage_ledger_check_only_queries_wave1_columns_when_migrated():
+    # The corpus lane replays against a schema pinned at migration 022; the
+    # wave 1 clause must not reach MySQL there (Unknown column 'damage_applied').
+    old = DamageLedgerDb(has_wave1=False)
+    assert assertions.check_damage_ledger(old, emitted=5)["status"] == "ok"
+    assert "damage_applied" not in old.violations_query
+    new = DamageLedgerDb(has_wave1=True)
+    assert assertions.check_damage_ledger(new, emitted=5)["status"] == "ok"
+    assert "damage_applied > damage" in new.violations_query
+    assert "health_after > health_before" in new.violations_query

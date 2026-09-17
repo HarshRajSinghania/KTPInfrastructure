@@ -33,6 +33,7 @@ _PLAYER = r'"([^"<]*)<(\d+)><[^<>]*><([^<>]*)>"'
 
 _KILL_RE = re.compile(rf'{_PLAYER} killed {_PLAYER} with "([^"]*)"')
 _ASSIST_RE = re.compile(rf'{_PLAYER} triggered "assist" against {_PLAYER}')
+_LIFE_START_RE = re.compile(rf'{_PLAYER} triggered "life_boundary" .*\(kind "start"\)')
 _BREAK_RE = re.compile(rf'{_PLAYER} triggered "cap_break"')
 _FRAG_CONTEXT_RE = re.compile(
     rf'{_PLAYER} triggered "frag_context" against {_PLAYER} with "([^"]+)"'
@@ -615,6 +616,16 @@ def check_assist_attribution(log_text: str, *, window: int = 10) -> list[str]:
     plugin emits the assist immediately after the death it is attached to, so
     10s is generous; widening it further would start pairing an assist with an
     *earlier, unrelated* death of the same victim and invent violations.
+
+    That "earlier, unrelated death" case is exactly what a respawn already
+    rules out: a kill can only belong to the victim's *current* life, so a
+    `life_boundary` `kind "start"` (respawn) for that victim drops any prior
+    kill recorded against them, mirroring `ktp_stats_capture.inc`'s own
+    reset-on-respawn (`g_kscDmgTaken`/`g_kscLastEnemyAttacker`). Without this,
+    a death that never emits the engine's plain `killed` line — e.g.
+    KTPAssistDrive.amxx's scripted test kills — leaves a stale entry from an
+    earlier organic kill of the same victim, which the window alone can then
+    wrongly match against a later, unrelated assist.
     """
     violations: list[str] = []
     # Last kill per victim userid: (seconds, killer, line)
@@ -629,6 +640,11 @@ def check_assist_attribution(log_text: str, *, window: int = 10) -> list[str]:
             killer, victim = _actor(g, 0), _actor(g, 3)
             if t is not None:
                 last_kill[victim.userid] = (t, killer, line)
+            continue
+
+        life_start = _LIFE_START_RE.search(line)
+        if life_start:
+            last_kill.pop(_actor(life_start.groups(), 0).userid, None)
             continue
 
         a = _ASSIST_RE.search(line)

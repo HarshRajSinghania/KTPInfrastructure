@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789328375-NY2_h1-2609131532-dod_thunder2.dem",
+"players": [
+{
+"deaths": 24,
+"id": "STEAM_0:0:531977444",
+"kills": 27,
+"lifespan": {
+"avg": "41s 243ms 962us 605ns",
+"max": "1m 43s 994ms 995us 118ns",
+"min": "15s 156ms 5us 860ns"
+},
+"name": "SILVERBACK shmaltz",
+"score": 8,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:10054114",
+"kills": 23,
+"lifespan": {
+"avg": "30s 520ms 874us 23ns",
+"max": "1m 26s 831ms 909us 180ns",
+"min": "10s 737ms 60us 547ns"
+},
+"name": "SILVERBACK 3SidedQuarter",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:0:9258540",
+"kills": 11,
+"lifespan": {
+"avg": "29s 160ms 118us 102ns",
+"max": "1m 29s 672ms 912us 597ns",
+"min": "9s 287ms 963us 867ns"
+},
+"name": "SILVERBACK Bojanglers",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:1:77934219",
+"kills": 30,
+"lifespan": {
+"avg": "29s 834ms 836us 898ns",
+"max": "1m 6s 233ms 154us 297ns",
+"min": "9s 116ms 88us 867ns"
+},
+"name": "SILVERBACK pb_",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:11268691",
+"kills": 21,
+"lifespan": {
+"avg": "47s 264ms 136us 904ns",
+"max": "1m 50s 867ms 4us 394ns",
+"min": "12s 843ms 17us 578ns"
+},
+"name": "SILVERBACK drink-",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:47198332",
+"kills": 20,
+"lifespan": {
+"avg": "37s 193ms 800us 706ns",
+"max": "2m 2s 367ms 4us 394ns",
+"min": "14s 553ms 100us 586ns"
+},
+"name": "SILVERBACK faradayvzla;",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:22192243",
+"kills": 28,
+"lifespan": {
+"avg": "43s 417ms 944us 866ns",
+"max": "2m 27s 361ms 83us 984ns",
+"min": "9s 937ms 11us 719ns"
+},
+"name": "GL - khorga. new mouse",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:1155098",
+"kills": 23,
+"lifespan": {
+"avg": "39s 200ms 476us 74ns",
+"max": "1m 55s 338ms 989us 257ns",
+"min": "7s 524ms 902us 344ns"
+},
+"name": "GL - Manner",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:2169339",
+"kills": 19,
+"lifespan": {
+"avg": "38s 393ms 103us 27ns",
+"max": "1m 28s 763ms 488ns",
+"min": "16s 981ms 994us 629ns"
+},
+"name": "GL - mata b58",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 21,
+"id": "STEAM_0:0:13712426",
+"kills": 36,
+"lifespan": {
+"avg": "47s 518ms 35us 888ns",
+"max": "1m 52s 493ms 957us 520ns",
+"min": "11s 906ms 982us 421ns"
+},
+"name": "GL - Fincher",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:1:14384065",
+"kills": 32,
+"lifespan": {
+"avg": "58s 137ms 508us 816ns",
+"max": "2m 18s 129ms 28us 320ns",
+"min": "9s 538ms 940us 429ns"
+},
+"name": "GL - RaiveN",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:6137746",
+"kills": 21,
+"lifespan": {
+"avg": "37s 639ms 458us 289ns",
+"max": "1m 11s 622ms 985us 840ns",
+"min": "12s 932ms 6us 836ns"
+},
+"name": "GL - Su``:))))))))))))",
+"score": 2,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 50,
+"axis": 48
+}
+}
