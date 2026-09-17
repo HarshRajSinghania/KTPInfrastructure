@@ -645,6 +645,34 @@ def test_objective_scope_admits_only_direct_report_context_reset_end_plus_one():
     assert evidence["context_mismatches"] == []
 
 
+def test_objective_scope_admits_context_reset_one_second_before_daemon_end():
+    # The producer's clock stamps the teardown stop before the daemon's
+    # receipt clock stamps end_time; a second boundary between the two is a
+    # legitimate end - 1, not a foreign marker.
+    report_attempt_start = _objective("start", "1786376148-TEST", 110)
+    terminal = _objective(
+        "stop", "1786376148-TEST", 119, reason="context_reset"
+    )
+    log = "\n".join([MATCH_START, report_attempt_start, MATCH_END, terminal])
+
+    evidence = li.objective_attempt_marker_scopes(
+        log, contexts=_objective_contexts()
+    )
+
+    report = evidence["scopes"]["report"]
+    assert report["markers"] == [report_attempt_start, terminal]
+    assert report["admitted_context_reset_teardown"] == [terminal]
+    assert report["admitted_context_reset_end_plus_one"] == []
+    assert evidence["context_mismatches"] == []
+    # Two seconds early is still a mismatch.
+    early = _objective("stop", "1786376148-TEST", 118, reason="context_reset")
+    evidence = li.objective_attempt_marker_scopes(
+        "\n".join([MATCH_START, report_attempt_start, MATCH_END, early]),
+        contexts=_objective_contexts(),
+    )
+    assert evidence["context_mismatches"] == [early]
+
+
 def test_objective_teardown_admits_two_distinct_active_attempts_as_one_block():
     first_start = _objective(
         "start", "1786376148-TEST", 109, attempt=7
