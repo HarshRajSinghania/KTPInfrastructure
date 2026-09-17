@@ -20,10 +20,14 @@ holding it true):
      gate never sees a partial stage to object to.
 
   2. EXPECTED-MD5 ASSERTION. `--expect <basename>=<md5>` refuses to stage an
-     artifact whose local md5 doesn't match what you reviewed. KTPAMXX and
-     KTPMatchHandler bake a per-minute build timestamp, so an accidental rebuild
-     silently changes the shipped md5 -- this catches it before it reaches 24
-     instances. ("Verify by md5, not banner.")
+     artifact whose local md5 doesn't match what you reviewed. A plugin built by
+     its OWN repo's compile.sh bakes a per-minute KTP_BUILD_TIME, so an accidental
+     rebuild in a new minute silently changes the shipped md5 -- measured on
+     KTPMatchHandler 526da23, two builds a minute apart differ by 72,498 bytes and
+     by one byte of size. KTPAMXX's IN-TREE plugins (stats_logging, admin) bake no
+     stamp and rebuild bit-for-bit, but --expect still earns its keep there,
+     because a DIFFERENT amxxpc also changes the bytes and no commit pins the
+     compiler. ("Verify by md5, not banner.")
 
   3. WAVE-TIME RUNNER GATE. `--expect-runner <basename>=<md5>` refuses to stage
      unless the Tier-2 runner already holds the matching KTP_TEST_MODE build.
