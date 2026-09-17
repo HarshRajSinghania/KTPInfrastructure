@@ -281,6 +281,12 @@ def record_wave(artifacts: list[dict], hosts: list[str], targets: int,
     `base` is accepted as None so a hand-recorded or pre-existing wave still
     loads, but a base that IS supplied has to be well-formed -- a typo silently
     stored is the same as no record at all, only harder to notice.
+
+    `build_time` is the stamp the staged build baked, and `replaces_build_time`
+    the stamps it overwrites. With `base` they are what makes an artifact
+    replayable: `.amxx` md5s are not reproducible across minutes, so a build
+    whose stamp was not recorded here cannot be rebuilt to its own md5 even from
+    the right commit, and the fleet keeps no rollback copies.
     """
     staged_at = time.time() if staged_at is None else staged_at
     for a in artifacts:
@@ -308,7 +314,9 @@ def record_wave(artifacts: list[dict], hosts: list[str], targets: int,
         "narrowed": narrowed,
         "artifacts": [{"basename": a["basename"], "md5": a["md5"].lower(),
                        "remote_dir": a.get("remote_dir", ""), "version": a.get("version"),
-                       "base": a.get("base")}
+                       "base": a.get("base"),
+                       "build_time": a.get("build_time"),
+                       "replaces_build_time": a.get("replaces_build_time")}
                       for a in artifacts],
         "reconciled_at": None,
         "reconciled_by": None,
