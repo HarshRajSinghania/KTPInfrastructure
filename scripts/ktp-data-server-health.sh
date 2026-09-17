@@ -149,8 +149,15 @@ ledger_items() {
         silence=", and the last completed run was $(( age / 3600 ))h ago"
     fi
     if [ "$status" != "ok" ]; then
-        printf 'health-check-aborted\tthe previous run exited early at line %s (%s); it posted no alert and saved no state%s\n' \
-            "${line:-?}" "${status:-unknown}" "$silence"
+        # An ERR trap cannot name a line for a run that was signalled rather
+        # than errexit'd -- the OOM killer, a systemd stop. Saying "line 0"
+        # there would send the reader to the shebang.
+        local where="at line $line"
+        if [ -z "$line" ] || [ "$line" = "0" ]; then
+            where="at no line it could name, so it was signalled rather than failing a command"
+        fi
+        printf 'health-check-aborted\tthe previous run exited early %s (%s); it posted no alert and saved no state%s\n' \
+            "$where" "${status:-unknown}" "$silence"
         return 0
     fi
     if [ "$age" -lt 0 ]; then

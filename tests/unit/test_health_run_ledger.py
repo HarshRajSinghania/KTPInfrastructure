@@ -91,6 +91,17 @@ def test_a_run_that_died_is_reported_by_the_next_one(tmp_path):
     assert "posted no alert" in detail
 
 
+def test_a_signalled_run_does_not_claim_a_line_it_never_had(tmp_path):
+    """The OOM killer and `systemctl stop` trip no ERR trap, so there is no line
+    to report. `line 0` would send the reader to the shebang."""
+    out = items(tmp_path, "status=died\nrc=137\nline=0\ncompleted=996400", name="signal")
+    assert len(out) == 1, out
+    key, detail = out[0].split("\t", 1)
+    assert key == "health-check-aborted"
+    assert "line 0" not in detail
+    assert "signalled" in detail
+
+
 def test_a_run_that_completed_on_time_says_nothing(tmp_path):
     """Control. Without this the test above proves only that it can talk."""
     assert items(tmp_path, "status=ok\nrc=0\nline=0\nstarted=996000\ncompleted=996410",
