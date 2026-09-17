@@ -30,7 +30,7 @@ from scripts.in_game_result import unavailable as in_game_unavailable
 from scripts.kill_streaks import DEFINITION as KILL_STREAK_DEFINITION
 from scripts.kill_streaks import DEFINITION_VERSION as KILL_STREAK_DEFINITION_VERSION
 
-CONTRACT_VERSION = "analytics-report-dto-v1.3.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
+CONTRACT_VERSION = "analytics-report-dto-v1.4.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
 
 # hlstatsx DATETIMEs are naive league-local time: the data server runs
 # America/New_York. The website column is timestamptz, which reads a naive
@@ -377,6 +377,7 @@ def sanitize_report(report: dict) -> dict:
         "lane_analytics": _positional_block(se, names_by_id),
         "spatial": _spatial_block(report),
         "in_game_result": _in_game_result_block(report),
+        "key_moments": _key_moments_block(se, names_by_id),
         "player_halves": _player_halves_block(report),
         "kill_streaks": _kill_streaks_block(report),
         "weapon_sides": _weapon_sides_block(report),
@@ -391,6 +392,49 @@ IN_GAME_RESULT_HALF_FIELDS = (
     "half", "team1_points", "team2_points", "team1_cumulative",
     "team2_cumulative", "team1_side", "team2_side",
 )
+
+
+def _key_moments_block(se: dict, names_by_id: dict) -> dict:
+    """Public form of shadow_explorations.highlight_windows.
+
+    A coarse, derived list -- at most top_n windows, each a game-time span, a
+    one-line summary, and the few players involved by name. It is not the event
+    stream: the per-event ``timeline`` stays private, and this block carries no
+    ids, positions, or per-kill detail. Consumers (key-moments section, HLTV
+    deep links, post-match message) read this rather than re-ranking.
+    """
+    hw = se.get("highlight_windows") or {}
+    return {
+        "status": hw.get("status") or "unavailable",
+        "definition": hw.get("definition"),
+        "definition_version": hw.get("definition_version"),
+        "parameters": dict(hw.get("parameters") or {}),
+        "windows_total": _num(hw.get("windows_total")),
+        "windows": [
+            {
+                "rank": w.get("rank"),
+                "half": w.get("half"),
+                "start": _num(w.get("start")),
+                "end": _num(w.get("end")),
+                "duration": _num(w.get("duration")),
+                "peak_at": _num(w.get("peak_at")),
+                "kinds": list(w.get("kinds") or []),
+                "events": _num(w.get("events")),
+                "swing": _num(w.get("swing")),
+                "peak_delta": _num(w.get("peak_delta")),
+                "score": _num(w.get("score")),
+                "summary": w.get("summary"),
+                "involved": [
+                    {"name": _name(p.get("player_name_at_match"))
+                     or names_by_id.get(p.get("player_id")),
+                     "team": p.get("team"),
+                     "involvement": _num(p.get("involvement"))}
+                    for p in w.get("involved") or []
+                ],
+            }
+            for w in hw.get("windows") or []
+        ],
+    }
 
 
 def _in_game_result_block(report: dict) -> dict:
