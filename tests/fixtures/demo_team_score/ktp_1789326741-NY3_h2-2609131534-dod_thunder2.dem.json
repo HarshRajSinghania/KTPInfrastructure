@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789326741-NY3_h2-2609131534-dod_thunder2.dem",
+"players": [
+{
+"deaths": 29,
+"id": "STEAM_0:1:68153627",
+"kills": 34,
+"lifespan": {
+"avg": "33s 346ms 307us 569ns",
+"max": "1m 23s 705ms 17us 90ns",
+"min": "9s 513ms 488ns"
+},
+"name": "-revo njr",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 28,
+"id": "STEAM_0:0:7641042",
+"kills": 27,
+"lifespan": {
+"avg": "35s 54ms 977us 416ns",
+"max": "1m 48s 949ms 996us 949ns",
+"min": "13s 824ms 5us 127ns"
+},
+"name": "-REVO Saca",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:1:8076501",
+"kills": 26,
+"lifespan": {
+"avg": "29s 309ms 22us 152ns",
+"max": "46s 447ms 998us 47ns",
+"min": "12s 455ms 993us 652ns"
+},
+"name": "-revo berty!",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:1:3306503",
+"kills": 16,
+"lifespan": {
+"avg": "56s 526ms 45us 227ns",
+"max": "3m 6s 857ms 25us 146ns",
+"min": "10s 231ms 933us 594ns"
+},
+"name": "-revo Ecl1ps3",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:1:16442079",
+"kills": 24,
+"lifespan": {
+"avg": "54s 903ms 747us 558ns",
+"max": "4m 46s 725ms 952us 148ns",
+"min": "7s 15ms 14us 648ns"
+},
+"name": "-revo KumKum",
+"score": 1,
+"team": "allies"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:0:947716100",
+"kills": 23,
+"lifespan": {
+"avg": "32s 214ms 442us 952ns",
+"max": "1m 5s 345ms 31us 738ns",
+"min": "12s 428ms 955us 78ns"
+},
+"name": "-revo jonski,",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:11692441",
+"kills": 23,
+"lifespan": {
+"avg": "48s 183ms 217us 366ns",
+"max": "2m 35s 10ms 9us 765ns",
+"min": "6s 579ms 10us 10ns"
+},
+"name": "icyHOT ~ monday",
+"score": 8,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:1:2996359",
+"kills": 24,
+"lifespan": {
+"avg": "37s 551ms 463us 200ns",
+"max": "2m 38s 226ms 196us 289ns",
+"min": "9s 262ms 84us 961ns"
+},
+"name": "icyHOT ~ s i k <3 n a t",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:748805",
+"kills": 34,
+"lifespan": {
+"avg": "39s 892ms 734us 234ns",
+"max": "1m 44s 343ms 994us 141ns",
+"min": "9s 262ms 84us 961ns"
+},
+"name": "icyHOT ~ sean",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:1:16983",
+"kills": 30,
+"lifespan": {
+"avg": "33s 674ms 428us 667ns",
+"max": "1m 18s 298ms 4us 150ns",
+"min": "5s 934ms 997us 559ns"
+},
+"name": "icyHOT ~ vertex",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:1:20567065",
+"kills": 14,
+"lifespan": {
+"avg": "37s 453ms 171us 341ns",
+"max": "1m 53s 40ms 39us 62ns",
+"min": "9s 262ms 84us 961ns"
+},
+"name": "icyHOT ~ tomfoolery",
+"score": 1,
+"team": "axis"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:0:90794",
+"kills": 21,
+"lifespan": {
+"avg": "32s 689ms 213us 168ns",
+"max": "1m 11s 802ms 9us 583ns",
+"min": "9s 325ms 73us 242ns"
+},
+"name": "icyHOT ~ kanguhhh?!",
+"score": 0,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 70,
+"axis": 130
+}
+}
