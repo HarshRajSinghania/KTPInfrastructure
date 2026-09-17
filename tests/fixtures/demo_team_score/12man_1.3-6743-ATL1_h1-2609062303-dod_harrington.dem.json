@@ -1,0 +1,165 @@
+{
+"file": "12man_1.3-6743-ATL1_h1-2609062303-dod_harrington.dem",
+"players": [
+{
+"deaths": 28,
+"id": "STEAM_0:0:947716100",
+"kills": 39,
+"lifespan": {
+"avg": "33s 464ms 90us 281ns",
+"max": "1m 25s 623ms 168us 945ns",
+"min": "5s 408ms 935us 547ns"
+},
+"name": "berty-",
+"score": 11,
+"team": "allies"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:1:8076501",
+"kills": 27,
+"lifespan": {
+"avg": "31s 794ms 573us 974ns",
+"max": "1m 24s 835ms 205us 78ns",
+"min": "1s 225ms 402us 832ns"
+},
+"name": "berty!",
+"score": 9,
+"team": "allies"
+},
+{
+"deaths": 33,
+"id": "STEAM_0:1:68153627",
+"kills": 42,
+"lifespan": {
+"avg": "27s 674ms 493us 228ns",
+"max": "1m 3s 384ms 948us 730ns",
+"min": "6s 137ms 939us 453ns"
+},
+"name": "100％berty!",
+"score": 8,
+"team": "allies"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:1:25429845",
+"kills": 40,
+"lifespan": {
+"avg": "32s 347ms 305us 297ns",
+"max": "2m 5s 319ms 946us 289ns",
+"min": "9s 540ms 8us 545ns"
+},
+"name": "Savage¬",
+"score": 7,
+"team": "allies"
+},
+{
+"deaths": 43,
+"id": "STEAM_0:1:348895",
+"kills": 22,
+"lifespan": {
+"avg": "19s 500ms 962us 368ns",
+"max": "50s 507ms 19us 43ns",
+"min": "6s 938ms 964us 844ns"
+},
+"name": "pipes",
+"score": 5,
+"team": "allies"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:0:9167552",
+"kills": 26,
+"lifespan": {
+"avg": "36s 745ms 376us 21ns",
+"max": "3m 5s 19ms 958us 496ns",
+"min": "7s 46ms 997us 70ns"
+},
+"name": "asdf m1",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:1:100871",
+"kills": 27,
+"lifespan": {
+"avg": "30s 423ms 934us 444ns",
+"max": "1m 29s 546ms 20us 508ns",
+"min": "2s 231ms 994us 629ns"
+},
+"name": "SILVERBACK e`man",
+"score": 8,
+"team": "axis"
+},
+{
+"deaths": 37,
+"id": "STEAM_0:0:14081672",
+"kills": 26,
+"lifespan": {
+"avg": "24s 48ms 134us 251ns",
+"max": "1m 3s 212ms 36us 132ns",
+"min": "5s 48ms 217us 774ns"
+},
+"name": "SILVERBACK chi",
+"score": 8,
+"team": "axis"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:64041420",
+"kills": 25,
+"lifespan": {
+"avg": "30s 784ms 105us 854ns",
+"max": "1m 38s 328ms 979us 493ns",
+"min": "5s 23ms 681us 640ns"
+},
+"name": "shmatlz loves NICKLEBACK",
+"score": 8,
+"team": "axis"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:531977444",
+"kills": 41,
+"lifespan": {
+"avg": "31s 689ms 345us 821ns",
+"max": "1m 6s 978ms 942us 871ns",
+"min": "5s 706ms 54us 687ns"
+},
+"name": "SILVERBACK shmaltz",
+"score": 7,
+"team": "axis"
+},
+{
+"deaths": 33,
+"id": "STEAM_0:1:1213993",
+"kills": 27,
+"lifespan": {
+"avg": "26s 973ms 366us 232ns",
+"max": "1m 41s 279ms 52us 735ns",
+"min": "1s 971ms 130us 371ns"
+},
+"name": "w1llawaw",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 44,
+"id": "STEAM_0:1:32793027",
+"kills": 41,
+"lifespan": {
+"avg": "17s 769ms 752us 502ns",
+"max": "54s 369ms 934us 82ns",
+"min": "1s 745ms 971us 679ns"
+},
+"name": "SILVERBACK cK-",
+"score": 1,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 173,
+"axis": 93
+}
+}

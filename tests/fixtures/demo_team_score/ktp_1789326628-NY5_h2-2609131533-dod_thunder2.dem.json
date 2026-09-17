@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789326628-NY5_h2-2609131533-dod_thunder2.dem",
+"players": [
+{
+"deaths": 11,
+"id": "STEAM_0:0:6122950",
+"kills": 26,
+"lifespan": {
+"avg": "1m 31s 507ms 13us 956ns",
+"max": "3m 39s 904ms 968us 262ns",
+"min": "20s 233ms 1us 709ns"
+},
+"name": "M17 arachnid",
+"score": 5,
+"team": "allies"
+},
+{
+"deaths": 19,
+"id": "STEAM_0:1:3483281",
+"kills": 20,
+"lifespan": {
+"avg": "48s 837ms 577us 93ns",
+"max": "2m 32s 695ms 983us 887ns",
+"min": "5s 282ms 997us 131ns"
+},
+"name": "M17 firo",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 32,
+"id": "STEAM_0:0:20472442",
+"kills": 17,
+"lifespan": {
+"avg": "27s 258ms 539us 36ns",
+"max": "47s 709ms 991us 455ns",
+"min": "4s 328ms 979us 492ns"
+},
+"name": "M17 genne",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 21,
+"id": "STEAM_0:1:64166069",
+"kills": 29,
+"lifespan": {
+"avg": "45s 722ms 177us 678ns",
+"max": "1m 41s 555ms 999us 756ns",
+"min": "18s 627ms 990us 722ns"
+},
+"name": "M17 Rileyssss",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:1:189879",
+"kills": 28,
+"lifespan": {
+"avg": "39s 875ms 159us 263ns",
+"max": "3m 11s 615ms 997us 315ns",
+"min": "7s 28ms 999us 329ns"
+},
+"name": "M17 InSaNe[dd] <NuBeas>",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:40651927",
+"kills": 17,
+"lifespan": {
+"avg": "46s 117ms 718us 904ns",
+"max": "2m 38s 453ms 979us 493ns",
+"min": "10s 675ms 987us 243ns"
+},
+"name": "M17 PkLl",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:1:11944425",
+"kills": 8,
+"lifespan": {
+"avg": "30s 797ms 526us 41ns",
+"max": "1m 27s 692ms 993us 164ns",
+"min": "7s 92ms 41us 15ns"
+},
+"name": "Me*sango",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:1:13233799",
+"kills": 22,
+"lifespan": {
+"avg": "38s 172ms 351us 74ns",
+"max": "1m 33s 473ms 22us 461ns",
+"min": "16s 947ms 21us 485ns"
+},
+"name": "Me*uuuuuuksiiGp",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:861147112",
+"kills": 19,
+"lifespan": {
+"avg": "45s 243ms 796us 608ns",
+"max": "1m 41s 50ms 994us 873ns",
+"min": "4s 49ms 926us 757ns"
+},
+"name": "Me*^Lucky †",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 19,
+"id": "STEAM_0:0:12973436",
+"kills": 22,
+"lifespan": {
+"avg": "51s 193ms 791us 198ns",
+"max": "2m 519ms 958us 496ns",
+"min": "13s 986ms 83us 985ns"
+},
+"name": "Me * rEvalz [T]",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:192873300",
+"kills": 28,
+"lifespan": {
+"avg": "38s 46ms 746us 713ns",
+"max": "1m 13s 891ms 983us 32ns",
+"min": "15s 909ms 57us 618ns"
+},
+"name": "Me * ziBOUGNOULE",
+"score": 1,
+"team": "axis"
+},
+{
+"deaths": 21,
+"id": "STEAM_0:1:11792541",
+"kills": 23,
+"lifespan": {
+"avg": "45s 668ms 31us 172ns",
+"max": "1m 41s 429ms 992us 676ns",
+"min": "20s 817ms 16us 602ns"
+},
+"name": "Me* jo3y",
+"score": 0,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 117,
+"axis": 79
+}
+}

@@ -1,0 +1,178 @@
+{
+"file": "ktp_1789348148-ATL4_h1-2609132101-dod_thunder2.dem",
+"players": [
+{
+"deaths": 13,
+"id": "STEAM_0:1:2519215",
+"kills": 31,
+"lifespan": {
+"avg": "1m 18s 578ms 613us 281ns",
+"max": "3m 21s 208ms 984us 375ns",
+"min": "22s 910ms 34us 180ns"
+},
+"name": "nitroX",
+"score": 5,
+"team": "allies"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:0:11784460",
+"kills": 24,
+"lifespan": {
+"avg": "55s 299ms 929us 970ns",
+"max": "4m 8s 465ms 209us 961ns",
+"min": "9s 981ms 79us 102ns"
+},
+"name": "lobX                      ~",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:1:16512295",
+"kills": 28,
+"lifespan": {
+"avg": "37s 693ms 128us 797ns",
+"max": "1m 16s 626ms 98us 632ns",
+"min": "10s 96ms 69us 336ns"
+},
+"name": "RaphinhaX",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:0:17188536",
+"kills": 16,
+"lifespan": {
+"avg": "30s 213ms 83us 902ns",
+"max": "1m 11s 731ms 79us 101ns",
+"min": "7s 838ms 989us 258ns"
+},
+"name": "unkX",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:2495424",
+"kills": 17,
+"lifespan": {
+"avg": "39s 552ms 652us 994ns",
+"max": "1m 30s 725ms 402us 832ns",
+"min": "12s 653ms 259us 277ns"
+},
+"name": "MaT*X",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:0:3656742",
+"kills": 26,
+"lifespan": {
+"avg": "54s 124ms 479us 595ns",
+"max": "2m 16s 265ms 625us",
+"min": "20s 609ms 8us 789ns"
+},
+"name": "[$] nomistizzle.iwa <8{~",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:24858784",
+"kills": 20,
+"lifespan": {
+"avg": "42s 180ms 29us 827ns",
+"max": "1m 46s 229ms 3us 906ns",
+"min": "14s 715ms 26us 855ns"
+},
+"name": "[$] nacho-",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:99398",
+"kills": 13,
+"lifespan": {
+"avg": "40s 889ms 846us 801ns",
+"max": "2m 29s 287ms 963us 867ns",
+"min": "15s 857ms 788us 86ns"
+},
+"name": "[$] Carpal Tunnel Cory",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:1794",
+"kills": 19,
+"lifespan": {
+"avg": "38s 719ms 213us 867ns",
+"max": "2m 9s 704ms 956us 55ns",
+"min": "7s 649ms 536us 133ns"
+},
+"name": "[$] calebsod",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:3906550",
+"kills": 25,
+"lifespan": {
+"avg": "35s 906ms 585us 693ns",
+"max": "1m 48s 107ms 910us 157ns",
+"min": "9s 26ms 367us 187ns"
+},
+"name": "[$] sTarK x_0",
+"score": 1,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:285397",
+"kills": 24,
+"lifespan": {
+"avg": "39s 68ms 276us 367ns",
+"max": "1m 38s 583ms 7us 812ns",
+"min": "6s 255ms 737us 305ns"
+},
+"name": "BX",
+"score": 2,
+"team": null
+},
+{
+"deaths": 31,
+"id": "STEAM_0:1:454573929",
+"kills": 29,
+"lifespan": {
+"avg": "29s 735ms 203us 896ns",
+"max": "1m 11s 268ms 981us 934ns",
+"min": "5s 813ms 964us 844ns"
+},
+"name": "[$] allennnnnn",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 0,
+"id": "STEAM_0:0:30958790",
+"kills": 0,
+"lifespan": {
+"avg": "20m 3s 979ms 919us 434ns",
+"max": "20m 3s 979ms 919us 434ns",
+"min": "20m 3s 979ms 919us 434ns"
+},
+"name": "[ o_o ] zG.-",
+"score": 0,
+"team": "spectators"
+}
+],
+"teams": {
+"allies": 54,
+"axis": 46
+}
+}
