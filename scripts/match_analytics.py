@@ -91,7 +91,7 @@ from scripts.side_splits import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 14  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time
+SCHEMA_VERSION = 15  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time; 15: aim shadow (computed placement + AC on-hit precision)
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -165,11 +165,13 @@ INTEGER_COLUMNS = {
     "score_points", "score_points_placed", "score_events_unresolved",
     "head_hits", "chest_hits", "stomach_hits", "arm_hits", "leg_hits",
     "grenade_throws", "grenade_bursts_matched", "grenade_cooked",
+    "placement_shots", "ac_hits_with_geometry", "ac_range_avg",
 }
 FLOAT_COLUMNS = {
     "kd_ratio", "kda_ratio", "damage_per_minute", "damage_per_life",
     "headshot_rate", "raw_accuracy", "game_time", "first_shot_delay_avg",
-    "grenade_flight_avg",
+    "grenade_flight_avg", "placement_avg_deg", "placement_under5_pct",
+    "placement_under15_pct", "ac_err_avg_deg", "ac_target_angvel_avg_dps",
 }
 
 
@@ -365,6 +367,12 @@ SELECT
   EXISTS(SELECT 1 FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name = 'ktp_grenade_throw_events')
     AS grenade_throws,
+  EXISTS(SELECT 1 FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name = 'ktp_shot_events')
+    AS shot_events,
+  EXISTS(SELECT 1 FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name = 'ktp_ac_weapon_fires')
+    AS ac_weapon_fires,
   EXISTS(SELECT 1 FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name = 'hlstats_Events_Statsme')
     AS statsme,
@@ -1097,6 +1105,32 @@ def attach_wave_facts(
                 player[key] = wave.get(key)
 
 
+AIM_PLAYER_KEYS = (
+    "placement_shots", "placement_avg_deg", "placement_under5_pct", "placement_under15_pct",
+    "ac_hits_with_geometry", "ac_err_avg_deg", "ac_range_avg", "ac_target_angvel_avg_dps",
+)
+
+
+def attach_aim_facts(
+    players: list[dict[str, Any]],
+    placement_rows: list[dict[str, Any]] | None,
+    precision_rows: list[dict[str, Any]] | None,
+) -> None:
+    """Aim shadow facts on the box-score rows, in place. Shadow only: no rating
+    impact, no publication -- infra-aim-telemetry's field map, computed.
+
+    None everywhere a source is absent OR the player has no row: a player with
+    no shots was not measured, which is not a placement of zero degrees.
+    """
+    placement = {int(r["player_id"]): r for r in (placement_rows or [])}
+    precision = {int(r["player_id"]): r for r in (precision_rows or [])}
+    for player in players:
+        pid = int(player["player_id"])
+        for key in AIM_PLAYER_KEYS:
+            source = precision if key.startswith("ac_") else placement
+            player[key] = source.get(pid, {}).get(key)
+
+
 def public_players(players: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove individual positional coverage from shareable player records."""
     public = []
@@ -1374,6 +1408,28 @@ def wave_markdown(report: dict[str, Any]) -> list[str]:
     ]
 
 
+def aim_markdown(report: dict[str, Any]) -> list[str]:
+    players = report.get("players") or []
+    if not any(p.get("placement_shots") is not None or p.get("ac_hits_with_geometry") is not None
+               for p in players):
+        return ["Not available: needs the shot stream (schema-24 producer) with live "
+                "position samples, and/or the anti-cheat ledger (production only)."]
+    return [
+        markdown_table(players, [
+            ("player_name_at_match", "Player"), ("team_name", "Team"),
+            ("placement_shots", "Shots"), ("placement_avg_deg", "Placement avg (deg)"),
+            ("placement_under5_pct", "<5 deg %"), ("placement_under15_pct", "<15 deg %"),
+            ("ac_hits_with_geometry", "Hits w/ geom"), ("ac_err_avg_deg", "On-hit err (deg)"),
+            ("ac_range_avg", "Range"), ("ac_target_angvel_avg_dps", "Target deg/s"),
+        ]),
+        "Placement is computed: angle from the view vector to the nearest-in-time "
+        "(+/-1 s, 2 s cadence) alive enemy sample, minimum over enemies -- a "
+        "distribution, never a per-shot verdict. On-hit error is the AC ledger's "
+        "err_udeg, present only for shots that hit a hitbox. Shadow only; no rating "
+        "impact.",
+    ]
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     match = report.get("match") or {}
     quality = report["quality"]
@@ -1443,6 +1499,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "with the box score exactly.",
         "", "## Producer waves 1-2", "",
         *wave_markdown(report),
+        "", "## Aim (shadow)", "",
+        *aim_markdown(report),
         "", "## Assists", "",
         markdown_table(report["assists"], [
             ("player_name_at_match", "Assister"), ("team_name", "Team"),
@@ -1768,6 +1826,18 @@ def build_report(
         if sources.get("grenade_throws", False)
         and capture_stream_authorized(capture_authorization, "grenade_throw") else None)
     attach_wave_facts(players, wave_players, score_players, grenade_throws)
+    # Aim shadow (infra-aim-telemetry field map). Placement needs the shot
+    # stream and live position samples; precision reads the AC ledger directly
+    # and is absent on any database that is not production.
+    placement = (
+        query_rows(db, "shot_placement_fact.sql", match_id)
+        if sources.get("shot_events", False)
+        and sources.get("positions", False)
+        and sources.get("position_liveness", False)
+        and capture_stream_authorized(capture_authorization, "shot") else None)
+    precision = (query_rows(db, "ac_precision_fact.sql", match_id)
+                 if sources.get("ac_weapon_fires", False) else None)
+    attach_aim_facts(players, placement, precision)
     enriched_frag_available = bool(
         sources.get("frag_context", False)
         and sources.get("frag_event_clock", False)

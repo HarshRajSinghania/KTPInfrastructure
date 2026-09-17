@@ -224,3 +224,23 @@ def test_attach_wave_facts_grenade_throws_none_vs_zero():
     )
     assert players[0]["grenade_cooked"] == 4
     assert players[1]["grenade_throws"] == 0 and players[1]["grenade_flight_avg"] is None
+
+
+def test_attach_aim_facts_is_none_when_unmeasured():
+    players = [{"player_id": 1}, {"player_id": 2}]
+    analytics.attach_aim_facts(players, None, None)
+    assert all(players[0][k] is None for k in analytics.AIM_PLAYER_KEYS)
+    analytics.attach_aim_facts(
+        players,
+        [{"player_id": 1, "placement_shots": 40, "placement_avg_deg": 12.5,
+          "placement_under5_pct": 40.0, "placement_under15_pct": 70.0}],
+        [{"player_id": 2, "ac_hits_with_geometry": 9, "ac_err_avg_deg": 1.8,
+          "ac_range_avg": 500, "ac_target_angvel_avg_dps": 6.0}],
+    )
+    assert players[0]["placement_avg_deg"] == 12.5 and players[0]["ac_err_avg_deg"] is None
+    # No shots is "not measured", not zero degrees.
+    assert players[1]["placement_shots"] is None and players[1]["ac_err_avg_deg"] == 1.8
+    lines = analytics.aim_markdown({"players": [dict(p, player_name_at_match="p", team_name="Allies")
+                                                for p in players]})
+    assert any("| p |" in line for line in lines)
+    assert len(analytics.aim_markdown({"players": [{"player_id": 3}]})) == 1
