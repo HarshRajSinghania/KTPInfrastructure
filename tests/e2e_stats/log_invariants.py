@@ -532,7 +532,12 @@ def objective_attempt_marker_scopes(
             attempt_id = properties["attempt_id"]
             basic = (
                 index in contiguous_indexes
-                and event_epoch in (end_epoch, end_epoch + 1)
+                # end_epoch is the daemon's receipt clock for KTP_MATCH_END;
+                # the producer stamps this teardown marker with its own clock
+                # after logging match end, so receipt lag across a second
+                # boundary legitimately puts it at end - 1 (Lane B soak run
+                # 35226967973: marker 1789652469, end 1789652470).
+                and event_epoch in (end_epoch - 1, end_epoch, end_epoch + 1)
                 and properties.get("kind") == "stop"
                 and properties.get("stop_reason") == "context_reset"
                 and len(starts.get(attempt_id, [])) == 1
