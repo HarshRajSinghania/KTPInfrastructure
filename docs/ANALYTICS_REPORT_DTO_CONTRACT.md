@@ -14,6 +14,7 @@ meaning is not obvious from their names.
 | `analytics-report-dto-v1.2.0` | 11 | Adds `kill_streaks`, `weapon_sides`, `duels_by_side`, `player_classes`, `players[].best_streak`, `player_halves.rows[].side` and `.best_streak`; cap breaks in `player_halves` take the producer half |
 | `analytics-report-dto-v1.3.0` | 12 | Adds `score`, `points_per_minute`, `grenade_kills`, `grenade_damage`, `grenade_damage_taken` to `teams[]`, `players[]` and `player_halves.rows[]`; `map_profiles` (season aggregate) adds `kills_per_minute` and `points_per_minute` |
 | `analytics-report-dto-v1.4.0` | 16 | Adds top-level `key_moments`: the match's highlight windows ranked on flag swing, names only |
+| `analytics-report-dto-v1.5.0` | 17 | Adds top-level `progression` (cumulative per-player series per half: kills, deaths, damage; per-team flag differential) and `box_score_scale` (fill-bar denominators and match-best names per `players[]` field) |
 
 Minor versions only add keys. A consumer that matches the
 `analytics-report-dto-v1.` prefix keeps working; one that needs the new blocks
@@ -160,6 +161,60 @@ carries no ids, no positions, and no per-kill detail.
 Ranking is on uncalibrated `flag_swing_v1` deltas, so order is comparative,
 not absolute. A window longer than `max_len` is centred on its peak event
 rather than truncated from the start.
+
+## `progression` (v1.5.0)
+
+`definition: progression_v1`. Cumulative series over each half — the data
+behind a kills-over-time chart — computed once here so the site, the HUD and
+any post-match message draw the same line. The site must not re-derive these
+from events; it never has the events.
+
+Three per-player metrics and one per-team metric. `players[]` rows are
+`{name, team, half, metric, points}`; `teams[]` rows are `{team, half, metric,
+points}`. `points` is `[[game_time, cumulative], ...]`, always starting at
+`[0, 0]` (for `flag_differential`, starting at the kickoff differential).
+
+**The x-axis is `game_time` within the half.** Each half is its own map load
+and the producer clock restarts, so halves are separate panels (or one axis
+with a marked boundary). There is no round index; DoD has none, and none is
+invented.
+
+| Metric | Counts |
+|---|---|
+| `kills` | Frags with a producer clock where the killer is on the other team — team kills and suicides excluded, matching the box score's `kills` |
+| `deaths` | Every frag with a clock where the player is the victim |
+| `damage` | `damage_capped` dealt to the other team, from per-hit rows; only when per-hit damage with a clock was captured (`available.damage`) |
+| `flag_differential` (team) | Flags held by team 1 minus team 2, seeded with the same spawn ownership `flag_swing_v1` uses; team 2's series is the negation |
+
+| Key | Meaning |
+|---|---|
+| `status` | `available` / `unavailable` (no timed source captured) / `timed_metrics_suppressed` (replay-sourced) |
+| `available` | Per metric, whether its source was captured for this match. A missing metric is absent from `players[]`, never a flat zero series |
+| `coverage` | `frags_with_clock` / `frags_total`, `damage_with_clock` / `damage_total`. A final point can trail the box score when some events carry no clock; this says how many |
+| `metrics`, `team_metrics` | The metric names present in this version |
+
+Every rostered player gets a series for every available metric in every half
+seen, even when it is only `[[0, 0]]` — zero kills is data, a missing series
+would read as no data.
+
+**Not in v1, deliberately:** cap participation (its per-event rows are keyed
+on wall clock, not game time) and cap breaks (no fact query loads per-event
+break rows). Both are additive follow-ups.
+
+## `box_score_scale` (v1.5.0)
+
+Fill-bar normalisation for `players[]`, computed once here so a second
+consumer cannot drift from the first. Operator ruling 2026-09-16: the
+denominator is the max across **all players in the match** (`scope:
+all_players`), not within the player's own team.
+
+`fields` has one entry per numeric `players[]` field:
+
+| Key | Meaning |
+|---|---|
+| `max_in_match` | The bar's denominator: the largest value any player posted. A consumer's fill is `value / max_in_match`. `null` when no player has a value |
+| `higher_is_better` | `false` for `deaths`, `damage_taken`, `team_kills`, `suicides`, `grenade_damage_taken`. The bar still scales on the max (it says "how much"), but a full bar is not an achievement and the star goes the other way |
+| `best` | Names holding the match-best value — the max, or the min where `higher_is_better` is false. Ties keep every name; empty when no value. A consumer's `is_match_best` is "name in best" |
 
 ## Reports built before schema 11
 
