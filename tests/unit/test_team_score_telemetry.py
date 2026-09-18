@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
-import sys
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -11,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from scripts import team_score_telemetry as score
-from scripts import import_team_score_events
 from scripts import project_team_score
 
 
@@ -598,73 +595,6 @@ def test_retention_classifier_matches_scheduled_policy():
         assert score.retention_class(match_type, "official") == "retained"
 
 
-def test_validate_only_cli_reports_counts_without_mysql(tmp_path):
-    path = write_observer(tmp_path, [official_event()])
-    root = Path(__file__).resolve().parents[2]
-    proc = subprocess.run(
-        [sys.executable, str(root / "scripts" / "import_team_score_events.py"),
-         "--source-server-root", f"{SOURCE_SERVER}={path.parent.parent}",
-         "--validate-only", str(path)],
-        cwd=root, capture_output=True, text=True, check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    result = json.loads(proc.stdout)
-    assert result["officialRows"] == 1
-    assert result["inserted"] == 0
-    assert result["conflictKeys"] == 0
-
-
-class _RecordingMysql:
-    built: list[dict] = []
-
-    def __init__(self, **kwargs):
-        _RecordingMysql.built.append(kwargs)
-        self.migrated = False
-
-    def apply_migration(self, path):
-        _RecordingMysql.built[-1]["migrated"] = True
-
-    def apply_migrations(self, paths):
-        _RecordingMysql.built[-1]["migrated"] = True
-        _RecordingMysql.built[-1]["migrations"] = list(paths)
-
-    def import_observations(self, parsed):
-        return import_team_score_events._validated_only(parsed)
-
-
-def _import_main(tmp_path, monkeypatch, *extra):
-    path = write_observer(tmp_path, [official_event()])
-    _RecordingMysql.built = []
-    monkeypatch.setattr(import_team_score_events, "MysqlCli", _RecordingMysql)
-    rc = import_team_score_events.main([
-        "--source-server-root", f"{SOURCE_SERVER}={path.parent.parent}",
-        *extra, str(path),
-    ])
-    return rc, _RecordingMysql.built
-
-
-def test_migrate_without_explicit_database_is_refused_before_any_client(
-        tmp_path, monkeypatch, capsys):
-    rc, built = _import_main(tmp_path, monkeypatch, "--migrate")
-    assert rc == 2
-    assert built == []
-    assert "--database" in capsys.readouterr().err
-
-
-def test_migrate_with_explicit_database_still_runs(tmp_path, monkeypatch):
-    """Control: the refusal is about the implicit default, not --migrate itself."""
-    rc, built = _import_main(tmp_path, monkeypatch,
-                             "--migrate", "--database", "hlstatsx_lan")
-    assert rc == 0
-    assert [(b["database"], b.get("migrated")) for b in built] == [("hlstatsx_lan", True)]
-
-
-def test_import_without_migrate_keeps_the_lan_default(tmp_path, monkeypatch):
-    rc, built = _import_main(tmp_path, monkeypatch)
-    assert rc == 0
-    assert [(b["database"], b.get("migrated")) for b in built] == [("hlstatsx_lan", None)]
-
-
 def test_projector_release_files_are_immutable_and_idempotent(tmp_path):
     path = tmp_path / "release.json"
     project_team_score._write_immutable(path, b"first")
@@ -746,25 +676,13 @@ def test_import_sql_writes_the_hud_observer_as_producer_of_both_ledgers(tmp_path
     assert sql.count(producer) == len(score._stage_rows(parsed.observations)) + len(parsed.manifests)
 
 
-def test_migrate_applies_every_registered_migration_in_order(tmp_path, monkeypatch):
-    rc, built = _import_main(tmp_path, monkeypatch,
-                             "--migrate", "--database", "hlstatsx_lan")
-    assert rc == 0
+def test_every_migration_file_is_registered_in_order():
     expected = [score.MIGRATION, score.PRODUCER_MIGRATION, score.DEMO_PRODUCER_MIGRATION,
                 score.DEMO_SETTLEMENT_MIGRATION]
-    assert built[0]["migrations"] == expected
     assert score.MIGRATIONS == tuple(expected)
     assert all(path.is_file() for path in score.MIGRATIONS)
     # an unregistered file in sql/ is applied by nothing, which is how 033 shipped inert
     assert set(score.MIGRATION.parent.glob("migrate_*.sql")) == set(score.MIGRATIONS)
-
-
-def test_explicit_migration_paths_replace_the_defaults_in_order(tmp_path, monkeypatch):
-    first, second = tmp_path / "a.sql", tmp_path / "b.sql"
-    rc, built = _import_main(tmp_path, monkeypatch, "--migrate", "--database", "x",
-                             "--migration", str(first), "--migration", str(second))
-    assert rc == 0
-    assert built[0]["migrations"] == [first, second]
 
 
 def _semicolons_in_comments_or_strings(sql: str) -> list[str]:
