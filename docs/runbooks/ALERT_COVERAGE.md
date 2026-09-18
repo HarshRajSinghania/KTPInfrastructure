@@ -82,13 +82,14 @@ that never "failed", and alerts on state transitions only.
 | `ktp-identity-reconcile.service` | yes | no | yes |
 | `ktp-hlstatsx-ingest-monitor.service` | yes | no | yes |
 | `ktp-reports.service` | yes, once the unit from `systemd/` is reinstalled; the live unit has none | no | a failing run alerts; `ktp-reports.timer` is not in `CRITICAL_TIMERS`, so a timer that stops firing does not. The journal only says `exit-code`; the cause is in `/var/log/ktp-report-service.log` |
-| `ktp-admin-bot.service` | **no** | **no** | **no — hole** |
-| `ktp-frag-diag-tail.service` | **no** | **no** | **no — hole** |
+| `ktp-admin-bot.service` | **no** | **no** | not critical — operator ruling 2026-09-18; a `failed` exit is still caught by `failed-unit:` |
+| `ktp-frag-diag-tail.service` | **no** | **no** | not critical — operator ruling 2026-09-18; a `failed` exit is still caught by `failed-unit:` |
 | any other unit systemd calls `failed` | — | via `failed-unit:<name>` | yes — `systemctl --failed` is a producer for the health check since 2026-09-16 |
 
-Both uncovered units are long-lived daemons currently `active (running)`. If
-either exits *cleanly* nothing says so; if either exits into `failed`, the
-`failed-unit:` producer now reports it once, by transition.
+Both are long-lived daemons currently `active (running)`. The operator ruled
+on 2026-09-18 that neither is critical: a clean exit or a stuck-inactive state
+pages nobody, by decision, not by omission. A `failed` exit is still reported
+once by the `failed-unit:` producer.
 
 ## Data server — timers and scheduled work
 
@@ -149,8 +150,8 @@ Ranked by what they would cost during Season 10.
    changed script is rolled to all five hosts.
 2. ~~**`CRITICAL_TIMERS` is three entries against ten timers.**~~ Closed
    2026-09-16: all ten live timers bar the Monday reminder are listed.
-3. **`ktp-admin-bot` and `ktp-frag-diag-tail` have no detection path at all** —
-   no `OnFailure=`, not in `CRITICAL_SERVICES`.
+3. ~~**`ktp-admin-bot` and `ktp-frag-diag-tail` have no detection path at all**~~
+   Ruled not critical, 2026-09-18. Not a hole; a decision.
 4. **Narrowed 2026-09-17, not closed: the hourly health check now reports its own
    last run; the weekly fleet audit still reports nothing.** Both are watchers,
    and a watcher that stops looks exactly like a quiet estate — which is why the
