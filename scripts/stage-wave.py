@@ -32,8 +32,11 @@ holding it true):
   3. WAVE-TIME RUNNER GATE. `--expect-runner <basename>=<md5>` refuses to stage
      unless the Tier-2 runner already holds the matching KTP_TEST_MODE build.
      That is a different binary from the one being staged, so its md5 must be
-     supplied -- the version cannot be read back out of a compiled `.amxx`
-     (XXMA+zlib). This answers a question the drift checker structurally cannot:
+     supplied: a version string cannot distinguish two builds of the same version,
+     and identity is the md5. (The version IS readable out of a compiled `.amxx` --
+     `scripts/amxx_version.py` and `build_stamp()` below both inflate the container.
+     Only `strings` fails on it.) This answers a question the drift checker
+     structurally cannot:
      it compares the runner against the FLEET, so on 2026-08-03 it saw a runner
      that was newer than the fleet by mtime and still two versions behind the
      artifact being waved. Staging a test-mode plugin without this flag warns.
