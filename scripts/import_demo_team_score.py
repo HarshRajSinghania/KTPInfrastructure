@@ -50,7 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     out.add_argument("--apply", action="store_true", help="execute against the database")
     out.add_argument("--migrate", action="store_true",
                      help="with --apply: first apply the ledger migrations (023 observations, 032 producer); "
-                          "both are idempotent, same as import_team_score_events --migrate")
+                          "both are idempotent")
     db = ap.add_argument_group("mysql")
     db.add_argument("--mysql-bin", default="mysql")
     db.add_argument("--database", help=f"required with --apply (default {LAN_DATABASE} is the LAN schema)")

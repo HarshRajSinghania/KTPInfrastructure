@@ -10,12 +10,11 @@ Operational scripts for KTP game servers and data server.
 
 ### Official team-score ingestion and projection
 
-`import_team_score_events.py` validates settled local/mounted observer
-`events.jsonl` plus adjacent `metadata.json`, requires an explicit
-`--source-server-root SOURCE_SERVER=ROOT`, binds the pair to its configured
-source path and closed analytics context, and imports
-only exact `engine-team-score-v1` rows into the append-only migration-023
-ledgers, labelling each one with `producer = KTPHudObserver` (migration 032). `project_team_score.py` runs the strict
+`import_demo_team_score.py` labels each half from the HLTV demo's engine
+TeamScore (`producer = hltv-demo`, migrations 033/034) into the append-only
+migration-023 ledgers; it runs hourly from the `ktp-demo-publish.sh` labels hook.
+The KTPHudObserver `events.jsonl` importer was retired 2026-09-18
+(`docs/OFFICIAL_TEAM_SCORE_TELEMETRY.md`). `project_team_score.py` runs the strict
 post-match boundary, ordering, side-map, carryover, and conflict checks before
 writing a canonical neutral-team DTO and immutable release digest.
 
