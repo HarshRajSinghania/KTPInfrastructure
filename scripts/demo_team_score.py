@@ -434,12 +434,17 @@ INSERT INTO `ktp_team_score_observations` ({rcols})
   SELECT {rcols} FROM `ktp_demo_ts_row_stage`
   WHERE match_id NOT IN (SELECT match_id FROM `ktp_demo_ts_skip`)
   ON DUPLICATE KEY UPDATE id=id;
+-- A second copy of the staged ids: MySQL cannot reference one TEMPORARY table
+-- twice in a single statement, and the result row counts against it twice (1137).
+CREATE TEMPORARY TABLE `ktp_demo_ts_manifest_ids` ENGINE=InnoDB AS
+  SELECT match_id FROM `ktp_demo_ts_manifest_stage`;
 SELECT 'KTP_DEMO_TEAM_SCORE_RESULT' AS result,
   (SELECT COUNT(*) FROM `ktp_team_score_ingest_manifests` m JOIN `ktp_demo_ts_manifest_stage` s ON s.match_id=m.match_id WHERE m.producer={prod}) AS manifests,
-  (SELECT COUNT(*) FROM `ktp_team_score_observations` o JOIN `ktp_demo_ts_manifest_stage` s ON s.match_id=o.match_id WHERE o.producer={prod}) AS observations,
+  (SELECT COUNT(*) FROM `ktp_team_score_observations` o JOIN `ktp_demo_ts_manifest_ids` s ON s.match_id=o.match_id WHERE o.producer={prod}) AS observations,
   (SELECT COUNT(*) FROM `ktp_demo_ts_skip`) AS skipped_other_producer,
   @ktp_demo_ts_lock AS lock_acquired;
 COMMIT;
+DROP TEMPORARY TABLE `ktp_demo_ts_manifest_ids`;
 DROP TEMPORARY TABLE `ktp_demo_ts_skip`;
 DROP TEMPORARY TABLE `ktp_demo_ts_row_stage`;
 DROP TEMPORARY TABLE `ktp_demo_ts_manifest_stage`;
