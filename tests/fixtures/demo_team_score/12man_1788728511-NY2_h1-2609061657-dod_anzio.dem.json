@@ -1,0 +1,165 @@
+{
+"file": "12man_1788728511-NY2_h1-2609061657-dod_anzio.dem",
+"players": [
+{
+"deaths": 20,
+"id": "STEAM_0:1:2279927",
+"kills": 30,
+"lifespan": {
+"avg": "49s 997ms 403us 99ns",
+"max": "2m 3s 442ms 16us 602ns",
+"min": "13s 321ms 960us 449ns"
+},
+"name": "-＃over. Szzzzz",
+"score": 20,
+"team": "allies"
+},
+{
+"deaths": 21,
+"id": "STEAM_0:1:258203",
+"kills": 10,
+"lifespan": {
+"avg": "45s 190ms 632us 213ns",
+"max": "2m 19s 236ms 328us 125ns",
+"min": "6s 542ms 968us 750ns"
+},
+"name": "[bb] p†",
+"score": 15,
+"team": "allies"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:1:7012713",
+"kills": 36,
+"lifespan": {
+"avg": "53s 847ms 646us 612ns",
+"max": "2m 51s 716ms 369us 629ns",
+"min": "3s 546ms 20us 508ns"
+},
+"name": "RenameD*| k1ng^",
+"score": 14,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:5931694",
+"kills": 13,
+"lifespan": {
+"avg": "44s 880ms 781us 693ns",
+"max": "2m 13s 637ms 23us 926ns",
+"min": "4s 15ms 14us 648ns"
+},
+"name": "RenameD*| Adammm!",
+"score": 13,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:10230748",
+"kills": 22,
+"lifespan": {
+"avg": "39s 393ms 485us 107ns",
+"max": "1m 51s 731ms 18us 67ns",
+"min": "12s 492ms 919us 921ns"
+},
+"name": "icyHOT ~ hildebrand?",
+"score": 11,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:0:14081672",
+"kills": 26,
+"lifespan": {
+"avg": "35s 80ms 601us 445ns",
+"max": "1m 58s 438ms 964us 843ns",
+"min": "3s 215ms 942us 383ns"
+},
+"name": "-＃over. chi",
+"score": 10,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:20614831",
+"kills": 25,
+"lifespan": {
+"avg": "42s 437ms 555us 727ns",
+"max": "1m 59s 106ms 933us 593ns",
+"min": "8s 378ms 997us 802ns"
+},
+"name": "-＃over. kAFRE",
+"score": 19,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:31962398",
+"kills": 18,
+"lifespan": {
+"avg": "39s 608ms 636us 474ns",
+"max": "2m 9s 47ms 302us 246ns",
+"min": "6s 965ms 942us 383ns"
+},
+"name": "-＃over. NoMames^",
+"score": 12,
+"team": "axis"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:96487569",
+"kills": 26,
+"lifespan": {
+"avg": "43s 548ms 554us 793ns",
+"max": "1m 41s 181ms 30us 273ns",
+"min": "8s 262ms 23us 926ns"
+},
+"name": "RenameD*| marcin<3",
+"score": 6,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:15083886",
+"kills": 17,
+"lifespan": {
+"avg": "38s 413ms 639us 948ns",
+"max": "1m 35s 839ms 965us 820ns",
+"min": "6s 929ms 992us 676ns"
+},
+"name": "RenameD*| Alexis <3",
+"score": 6,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:1:281787",
+"kills": 29,
+"lifespan": {
+"avg": "38s 54ms 68us 932ns",
+"max": "2m 11s 930ms 297us 851ns",
+"min": "8s 837ms 36us 132ns"
+},
+"name": "dicE[: :]warchyld[dd]",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:3697599",
+"kills": 11,
+"lifespan": {
+"avg": "39s 83ms 824us 462ns",
+"max": "1m 29s 15ms 14us 649ns",
+"min": "4s 112ms 976us 74ns"
+},
+"name": "GL - ^.^",
+"score": 2,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 295,
+"axis": 163
+}
+}

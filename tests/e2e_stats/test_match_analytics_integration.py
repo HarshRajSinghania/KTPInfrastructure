@@ -268,7 +268,17 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
         "grenade_entities": False,
         "player_halves": True,
         "break_producer_half": False,
+        # Migrations 032-034 and the AC ledger are not in the phase-a fixture:
+        # probed, absent, and every dependent box-score key is None.
+        "wave1_fields": False,
+        "score_events": False,
+        "duel_stats": False,
+        "grenade_throws": False,
+        "shot_events": False,
+        "ac_weapon_fires": False,
     }
+    assert all(player[key] is None for player in report["players"]
+               for key in analytics.WAVE_PLAYER_KEYS + analytics.AIM_PLAYER_KEYS)
     assert report["player_halves"]["status"] == "available"
     assert report["player_halves"]["reconciled"] is True
     assert report["kill_streaks"]["status"] == "available"
@@ -303,7 +313,7 @@ def test_contract_fixture_generates_complete_private_report(tmp_path):
             )
         else:
             assert player["damage_per_life"] is None
-    assert report["schema_version"] == 12
+    assert report["schema_version"] == 17
     assert report["shadow_timelines"]["status"] == "available"
     assert len(report["shadow_timelines"]["opening_duels"]) == 2
     assert report["shadow_timelines"]["fast_multikills"] == []

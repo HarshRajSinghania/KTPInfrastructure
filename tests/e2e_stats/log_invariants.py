@@ -33,6 +33,7 @@ _PLAYER = r'"([^"<]*)<(\d+)><[^<>]*><([^<>]*)>"'
 
 _KILL_RE = re.compile(rf'{_PLAYER} killed {_PLAYER} with "([^"]*)"')
 _ASSIST_RE = re.compile(rf'{_PLAYER} triggered "assist" against {_PLAYER}')
+_LIFE_START_RE = re.compile(rf'{_PLAYER} triggered "life_boundary" .*\(kind "start"\)')
 _BREAK_RE = re.compile(rf'{_PLAYER} triggered "cap_break"')
 _FRAG_CONTEXT_RE = re.compile(
     rf'{_PLAYER} triggered "frag_context" against {_PLAYER} with "([^"]+)"'
@@ -531,7 +532,12 @@ def objective_attempt_marker_scopes(
             attempt_id = properties["attempt_id"]
             basic = (
                 index in contiguous_indexes
-                and event_epoch in (end_epoch, end_epoch + 1)
+                # end_epoch is the daemon's receipt clock for KTP_MATCH_END;
+                # the producer stamps this teardown marker with its own clock
+                # after logging match end, so receipt lag across a second
+                # boundary legitimately puts it at end - 1 (Lane B soak run
+                # 35226967973: marker 1789652469, end 1789652470).
+                and event_epoch in (end_epoch - 1, end_epoch, end_epoch + 1)
                 and properties.get("kind") == "stop"
                 and properties.get("stop_reason") == "context_reset"
                 and len(starts.get(attempt_id, [])) == 1
@@ -615,6 +621,16 @@ def check_assist_attribution(log_text: str, *, window: int = 10) -> list[str]:
     plugin emits the assist immediately after the death it is attached to, so
     10s is generous; widening it further would start pairing an assist with an
     *earlier, unrelated* death of the same victim and invent violations.
+
+    That "earlier, unrelated death" case is exactly what a respawn already
+    rules out: a kill can only belong to the victim's *current* life, so a
+    `life_boundary` `kind "start"` (respawn) for that victim drops any prior
+    kill recorded against them, mirroring `ktp_stats_capture.inc`'s own
+    reset-on-respawn (`g_kscDmgTaken`/`g_kscLastEnemyAttacker`). Without this,
+    a death that never emits the engine's plain `killed` line — e.g.
+    KTPAssistDrive.amxx's scripted test kills — leaves a stale entry from an
+    earlier organic kill of the same victim, which the window alone can then
+    wrongly match against a later, unrelated assist.
     """
     violations: list[str] = []
     # Last kill per victim userid: (seconds, killer, line)
@@ -629,6 +645,11 @@ def check_assist_attribution(log_text: str, *, window: int = 10) -> list[str]:
             killer, victim = _actor(g, 0), _actor(g, 3)
             if t is not None:
                 last_kill[victim.userid] = (t, killer, line)
+            continue
+
+        life_start = _LIFE_START_RE.search(line)
+        if life_start:
+            last_kill.pop(_actor(life_start.groups(), 0).userid, None)
             continue
 
         a = _ASSIST_RE.search(line)

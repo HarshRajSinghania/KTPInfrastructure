@@ -367,6 +367,13 @@ w_sten w_tommy
 
 # The stock half of what the 2026-05-13 prune removed: underscore `_l`, in depot 31,
 # referenced by the binary, drawn on a sprinting player for everyone else to see.
+# Stock, shipped, binary-referenced and loadable — and OUT OF SCOPE anyway, by league
+# policy rather than by any fact about the file. The PIAT is reachable only on a British
+# class with the bazooka enabled, which KTP does not run in competitive play (operator
+# ruling 2026-09-16). Kept as its own set so the sets above stay a factual record of what
+# the GAME loads: subtract policy at the assert, never by editing the facts.
+POLICY_EXCLUDED_MODELS = frozenset("p_piat w_piat w_piat_rocket".split())
+
 STOCK_LOWERED_HELD_MODELS = frozenset("""
 p_bazooka_l p_bren_l p_enfield_l p_enfields_l p_fcarb_l p_garand_l p_grease_l p_k98_l
 p_k98s_l p_m1carb_l p_pschreck_l p_spring_l p_tommy_l
@@ -404,7 +411,8 @@ def _build_full_kit(mod, tmp_path, extra=()):
 
 
 def test_every_stock_loaded_weapon_model_is_in_the_kit(mod):
-    absent = sorted((STOCK_LOADED_HELD_MODELS | STOCK_LOADED_WORLD_MODELS) - set(_kit_names(mod)))
+    expected = (STOCK_LOADED_HELD_MODELS | STOCK_LOADED_WORLD_MODELS) - POLICY_EXCLUDED_MODELS
+    absent = sorted(expected - set(_kit_names(mod)))
     assert not absent, (
         f"stock models the game loads that the kit does not hash: {absent} -- each is "
         "in depot 31 and named by dod.so/client.so, so an unhashed one is a real gap"
@@ -436,7 +444,8 @@ def test_stock_lowered_models_reach_the_manifest_as_violations(mod, tmp_path):
 
 def test_primary_models_keep_the_primary_variant(mod, tmp_path):
     got = _build_full_kit(mod, tmp_path)
-    for base in sorted((STOCK_LOADED_HELD_MODELS | STOCK_LOADED_WORLD_MODELS) - STOCK_LOWERED_HELD_MODELS):
+    covered = (STOCK_LOADED_HELD_MODELS | STOCK_LOADED_WORLD_MODELS) - POLICY_EXCLUDED_MODELS
+    for base in sorted(covered - STOCK_LOWERED_HELD_MODELS):
         assert got[f"models/{base}.mdl"]["variant"] == "primary", base
 
 
@@ -485,7 +494,9 @@ def test_the_guard_refuses_a_model_in_two_families(mod, monkeypatch):
 
 def test_a_family_with_two_world_models_emits_both(mod, tmp_path):
     got = _build_full_kit(mod, tmp_path)
-    for base in ("w_bazooka", "w_bazooka_rocket", "w_pschreck", "w_pschreck_rocket", "w_piat", "w_piat_rocket"):
+    # w_piat/w_piat_rocket were a third example here until the 2026-09-16 policy
+    # exclusion; bazooka and pschreck still prove the *w_bases flattening.
+    for base in ("w_bazooka", "w_bazooka_rocket", "w_pschreck", "w_pschreck_rocket"):
         assert f"models/{base}.mdl" in got, f"{base} did not reach the manifest -- the emit loop must flatten *w_bases"
         assert got[f"models/{base}.mdl"]["category"] == "weapon_world_model", base
 
@@ -496,5 +507,8 @@ def test_the_full_kit_is_exactly_the_stock_loaded_set(mod, tmp_path):
     got = _build_full_kit(mod, tmp_path, extra=COMMUNITY_LOWERED_NAMES | set(NEVER_LOADED_STOCK_MODELS))
     emitted = {p[len("models/"):-len(".mdl")] for p, e in got.items()
                if e["category"] in ("weapon_player_model", "weapon_world_model")}
-    assert emitted == STOCK_LOADED_HELD_MODELS | STOCK_LOADED_WORLD_MODELS
+    assert emitted == (STOCK_LOADED_HELD_MODELS | STOCK_LOADED_WORLD_MODELS) - POLICY_EXCLUDED_MODELS, (
+        "the kit is the stock loaded set MINUS the policy exclusions -- if a PIAT model is back, "
+        "either the ruling changed or the exclusion table was edited without the sets"
+    )
     assert {e["severity"] for e in got.values()} == {"violation"}

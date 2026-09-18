@@ -138,6 +138,23 @@ def test_no_spawn_ownership_is_unchanged_behavior():
     assert not any("reconstructed from HUD" in c for c in result["caveats"])
 
 
+def test_half_1_sides_come_from_life_boundaries_not_the_roster():
+    # Roster says player 1 is team 1 (the side it held in half 2). In half 1
+    # it played Axis: a cap that flips a flag to Axis is ITS cap and must
+    # credit it positively; the roster-only reading credited it negatively.
+    lives = [{**spawn(pid, 1, 0.0), "team": 2 if pid <= 3 else 1}
+             for pid in (1, 2, 3, 4, 5, 6)]
+    states = [flag_state(1, 0, 2, 30.0, name="A")]
+    caps = [{"half": 1, "flag_name": "A", "event_time": "t30.0", "player_id": 1}]
+    frags = [frag(1, 40.0, 1, 4)]  # player 1 (Axis in h1) kills 4 (Allies in h1)
+    result = build_flag_swing_shadow(states, frags, lives, caps, ROSTER)
+    players = {p["player_id"]: p for p in result["players"]}
+    assert result["timeline"][0]["delta"] < 0  # P(engine Allies) fell
+    assert result["timeline"][1]["delta"] < 0  # an Allies man died
+    assert players[1]["attributed_swing"] > 0
+    assert players[1]["team"] == 1  # report numbering is untouched
+
+
 def test_swing_config_validation():
     with pytest.raises(ValueError):
         FlagSwingConfig(flag_coefficient=-1.0).validate()

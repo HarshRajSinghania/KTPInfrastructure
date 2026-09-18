@@ -1,0 +1,165 @@
+{
+"file": "12man_1.3-6744-ATL1_h2-2609070026-dod_armory_b6.dem",
+"players": [
+{
+"deaths": 38,
+"id": "STEAM_0:0:10230748",
+"kills": 20,
+"lifespan": {
+"avg": "23s 266ms 145us 168ns",
+"max": "1m 35s 510ms 9us 766ns",
+"min": "6s 281ms 860us 352ns"
+},
+"name": "icyHOT ~ hildebrand?",
+"score": 8,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:151174768",
+"kills": 36,
+"lifespan": {
+"avg": "39s 641ms 838us 378ns",
+"max": "1m 42s 130ms 4us 883ns",
+"min": "6s 535ms 34us 179ns"
+},
+"name": "HUGE in Japan",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:1:748805",
+"kills": 34,
+"lifespan": {
+"avg": "30s 695ms 896us 271ns",
+"max": "1m 14s 445ms 7us 324ns",
+"min": "8s 190ms 2us 441ns"
+},
+"name": "PAINTRAIN",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 34,
+"id": "STEAM_0:1:32793027",
+"kills": 30,
+"lifespan": {
+"avg": "25s 49ms 322us 240ns",
+"max": "1m 351ms 989us 746ns",
+"min": "8s 666ms 999us 817ns"
+},
+"name": "SILVERBACK cK-",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:0:531977444",
+"kills": 22,
+"lifespan": {
+"avg": "34s 247ms 704us 97ns",
+"max": "1m 19s 528ms 76us 172ns",
+"min": "11s 763ms 488ns"
+},
+"name": "SILVERBACK shmaltz",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:1:6941519",
+"kills": 17,
+"lifespan": {
+"avg": "31s 141ms 881us 635ns",
+"max": "1m 25s 252ms 929us 688ns",
+"min": "14s 670ms 13us 428ns"
+},
+"name": "tiny in Japan",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:25429845",
+"kills": 37,
+"lifespan": {
+"avg": "45s 813ms 921us 389ns",
+"max": "2m 5s 921ms 20us 508ns",
+"min": "12s 748ms 46us 875ns"
+},
+"name": "Savage¬",
+"score": 8,
+"team": "axis"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:1:68153627",
+"kills": 22,
+"lifespan": {
+"avg": "30s 169ms 590us 119ns",
+"max": "1m 6s 869ms 995us 117ns",
+"min": "8s 919ms 67us 383ns"
+},
+"name": "100％berty!",
+"score": 8,
+"team": "axis"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:1:16151757",
+"kills": 30,
+"lifespan": {
+"avg": "31s 602ms 946us 840ns",
+"max": "1m 53s 567ms 16us 601ns",
+"min": "5s 974ms 975us 586ns"
+},
+"name": "SeanIsProbablyRope",
+"score": 7,
+"team": "axis"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:1:19091457",
+"kills": 39,
+"lifespan": {
+"avg": "34s 196ms 649us 904ns",
+"max": "1m 44s 691ms 40us 39ns",
+"min": "6s 119ms 995us 117ns"
+},
+"name": "dbo father",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 28,
+"id": "STEAM_0:0:947716100",
+"kills": 31,
+"lifespan": {
+"avg": "33s 371ms 524us 416ns",
+"max": "1m 18s 548ms 988us 342ns",
+"min": "2s 151ms 976ns"
+},
+"name": "d0dnk",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:443810",
+"kills": 17,
+"lifespan": {
+"avg": "37s 858ms 361us 464ns",
+"max": "1m 20s 259ms 2us 685ns",
+"min": "8s 874ms 23us 438ns"
+},
+"name": "kroD-",
+"score": 2,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 145,
+"axis": 299
+}
+}

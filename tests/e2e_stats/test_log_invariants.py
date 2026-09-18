@@ -32,6 +32,14 @@ def _assist(assister, auid, ateam, victim, vuid, vteam, *, at="04:18:12"):
             f'(assister_position "-417 -329 -372") (victim_position "-733 751 -404")')
 
 
+def _life_start(name, uid, team, *, at="04:18:11"):
+    return (f"L 08/10/2026 - {at}: "
+            f'"{name}<{uid}><BOT><{team}>" triggered "life_boundary" '
+            f'(matchid "x") (half "1") (event_epoch "1") (game_time "1.00") '
+            f'(kind "start") (reason "spawn") (team "1") (class "1") '
+            f'(slot "{uid}") (sequence "1")')
+
+
 def _frag_context(killer, kuid, kteam, victim, vuid, vteam, *, headshot=0):
     return (TS + f'"{killer}<{kuid}><BOT><{kteam}>" triggered '
             f'"frag_context" against "{victim}<{vuid}><BOT><{vteam}>" '
@@ -98,6 +106,22 @@ def test_an_old_kill_outside_the_window_does_not_pair():
     log = "\n".join([
         _kill("Claire", 6, "Allies", "Wesker", 14, "Axis", at="04:10:00"),
         _assist("Claire", 6, "Allies", "Wesker", 14, "Axis", at="04:18:12"),
+    ])
+    assert li.check_assist_attribution(log) == []
+
+
+def test_a_respawn_clears_a_stale_kill_even_without_a_killed_line():
+    """Regression for run 35042631421: Wesker killed Claire once; Claire
+    respawned and died a second time to someone else, with Wesker landing a
+    legitimate assist. That second death is a scripted KTPAssistDrive kill,
+    which emits no `killed` line at all — only `life_boundary`. Without the
+    respawn clearing the stale first kill, the window alone wrongly pairs
+    Wesker's real assist with his unrelated earlier kill."""
+    log = "\n".join([
+        _kill("Wesker", 14, "Axis", "Claire", 6, "Allies", at="04:18:09"),
+        _life_start("Claire", 6, "Allies", at="04:18:11"),
+        # scripted second death: no `killed` line, straight to the assist
+        _assist("Wesker", 14, "Axis", "Claire", 6, "Allies", at="04:18:14"),
     ])
     assert li.check_assist_attribution(log) == []
 
@@ -619,6 +643,34 @@ def test_objective_scope_admits_only_direct_report_context_reset_end_plus_one():
     assert evidence["scopes"]["diagnostic"]["markers"] == [diagnostic]
     assert evidence["foreign_context"] == [foreign]
     assert evidence["context_mismatches"] == []
+
+
+def test_objective_scope_admits_context_reset_one_second_before_daemon_end():
+    # The producer's clock stamps the teardown stop before the daemon's
+    # receipt clock stamps end_time; a second boundary between the two is a
+    # legitimate end - 1, not a foreign marker.
+    report_attempt_start = _objective("start", "1786376148-TEST", 110)
+    terminal = _objective(
+        "stop", "1786376148-TEST", 119, reason="context_reset"
+    )
+    log = "\n".join([MATCH_START, report_attempt_start, MATCH_END, terminal])
+
+    evidence = li.objective_attempt_marker_scopes(
+        log, contexts=_objective_contexts()
+    )
+
+    report = evidence["scopes"]["report"]
+    assert report["markers"] == [report_attempt_start, terminal]
+    assert report["admitted_context_reset_teardown"] == [terminal]
+    assert report["admitted_context_reset_end_plus_one"] == []
+    assert evidence["context_mismatches"] == []
+    # Two seconds early is still a mismatch.
+    early = _objective("stop", "1786376148-TEST", 118, reason="context_reset")
+    evidence = li.objective_attempt_marker_scopes(
+        "\n".join([MATCH_START, report_attempt_start, MATCH_END, early]),
+        contexts=_objective_contexts(),
+    )
+    assert evidence["context_mismatches"] == [early]
 
 
 def test_objective_teardown_admits_two_distinct_active_attempts_as_one_block():
