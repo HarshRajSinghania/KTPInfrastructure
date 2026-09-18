@@ -112,6 +112,7 @@ provision/LAN-PC-OWNER-SETUP.pdf
 # why: gitignore patterns are case-sensitive on Linux, so COSTS.md alone leaves the
 # real filename (costs.md) stageable in a checkout like /opt/ktp-infra.
 COSTS.md
+# @hostinfo
 costs.md
 
 # @privacy
