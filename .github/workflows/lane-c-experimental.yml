@@ -88,13 +88,15 @@ on:
         default: '-1'
       shot_detail:
         description: >-
-          ktp_stats_shot_detail for this run. 0 (default, matching the plugin
-          default) leaves the shot diagnostics NULL; 1 populates them. The flag
-          stays off unless a match type is deliberately opted in.
+          ktp_stats_shot_detail for this run. 1 (default) populates the shot
+          diagnostics, matching the full lane: production runs them on
+          12-mans and check_hit_registration reads them. 0 leaves them NULL
+          and reports that check as not exercised; -1 leaves the plugin
+          default alone (off for the lane's match type).
         required: false
         type: choice
         options: ['-1', '0', '1']
-        default: '-1'
+        default: '1'
       play_seconds:
         description: Full-match play window (v6 schema22/2s ratings require at least 300 seconds)
         required: false

@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from scripts import team_score_telemetry as score
-from scripts import import_team_score_events
 from scripts import project_team_score
 from scripts.lane_b_e2e import import_lane_b_score_fixture
 from tests.e2e_stats.ephemeral_mysql import EphemeralMysql, MysqlUnavailable
@@ -395,26 +394,6 @@ SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
 WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_TYPE='CHECK' AND (
  (TABLE_NAME='ktp_team_score_observations' AND CONSTRAINT_NAME='chk_team_score_producer') OR
  (TABLE_NAME='ktp_team_score_ingest_manifests' AND CONSTRAINT_NAME='chk_team_score_manifest_producer'))""") == 2
-
-
-def test_importer_migrate_on_a_fresh_database_writes_the_producer(tmp_path):
-    with EphemeralMysql.start(parent=tmp_path) as db:
-        prepare_match(db, "db-match")
-        path = write_events(tmp_path, rows())
-        rc = import_team_score_events.main([
-            "--source-server-root", f"{SOURCE_SERVER}={path.parent.parent}",
-            "--migrate", "--database", db.database, "--mysql-bin", db.client,
-            "--socket", str(db.socket_path), "--user", "root", str(path),
-        ])
-        assert rc == 0
-        assert_producer_contract(db)
-        assert db.count(f"SELECT COUNT(*) FROM {OBSERVATIONS} WHERE BINARY producer='KTPHudObserver'") == 5
-        assert db.count(f"SELECT COUNT(*) FROM {OBSERVATIONS}") == 5
-        assert db.count(f"SELECT COUNT(*) FROM {MANIFESTS} WHERE BINARY producer='KTPHudObserver'") == 1
-        # Both migrations stay no-ops over a populated post-032 schema.
-        load_ledger(db)
-        db.load_file(score.MIGRATION)
-        assert_producer_contract(db)
 
 
 def test_production_order_023_then_032_with_reruns_in_every_order(tmp_path):

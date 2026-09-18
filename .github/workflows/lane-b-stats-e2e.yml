@@ -120,13 +120,15 @@ on:
         default: '-1'
       shot_detail:
         description: >-
-          ktp_stats_shot_detail for the run. 0 (default, matching the
-          plugin default) leaves the shot diagnostics NULL; 1 populates
-          them. Production opts a match type in deliberately, so the lane
-          does too.
+          ktp_stats_shot_detail for the run. 1 (default) populates the shot
+          diagnostics -- production runs them on 12-mans (bitmask 4, kept
+          on by the 2026-09-18 ruling), and the lane's own match type is
+          not a 12-man, so it opts in explicitly to exercise the same path;
+          check_hit_registration reads them. 0 leaves them NULL and reports
+          that check as not exercised.
         required: false
         type: string
-        default: '0'
+        default: '1'
       play_seconds:
         description: Full-match play window (v6 schema22/2s ratings require at least 300 seconds)
         required: false
@@ -183,13 +185,15 @@ on:
         default: '-1'
       shot_detail:
         description: >-
-          ktp_stats_shot_detail for the run. 0 (default, matching the
-          plugin default) leaves the shot diagnostics NULL; 1 populates
-          them. Production opts a match type in deliberately, so the lane
-          does too.
+          ktp_stats_shot_detail for the run. 1 (default) populates the shot
+          diagnostics -- production runs them on 12-mans (bitmask 4, kept
+          on by the 2026-09-18 ruling), and the lane's own match type is
+          not a 12-man, so it opts in explicitly to exercise the same path;
+          check_hit_registration reads them. 0 leaves them NULL and reports
+          that check as not exercised.
         required: false
         type: string
-        default: '0'
+        default: '1'
       play_seconds:
         description: 'How long to let the bots play'
         required: false
@@ -248,7 +252,7 @@ jobs:
       ENGINE_REPO: ${{ github.repository_owner }}/KTP-ReHLDS
       MAP_NAME: ${{ inputs.map_name || 'dod_anzio' }}
       PLAY_SECONDS: ${{ inputs.play_seconds || '360' }}
-      SHOT_DETAIL: ${{ inputs.shot_detail || '-1' }}
+      SHOT_DETAIL: ${{ inputs.shot_detail || '1' }}
       SHOT_DETAIL_TYPES: ${{ inputs.shot_detail_types || '-1' }}
       BASE_IMAGE: ghcr.io/${{ github.repository_owner }}/ktp-runtime-test-base:latest
 

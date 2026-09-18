@@ -587,6 +587,120 @@ else
     down+=("capture-loss=query-failed")
 fi
 
+# ---- Hit registration: do the server's own trace hits still turn into damage? ----
+# The 2026-09 hitreg investigation (coordination: infra-hitreg-diagnostics)
+# ended on one number: of the shot rows where the server's trace hit a live
+# enemy cleanly, the share with a ktp_damage_events row for the same
+# attacker/victim within 300 ms. 99.9% on 12,204 real hits, every half at
+# 99.2-100%. Nothing watched it afterwards; a regression in the plugin, the
+# daemon or the engine would look exactly like today until someone re-ran
+# the analysis by hand -- the same shape as every incident in
+# docs/runbooks/ALERT_COVERAGE.md.
+#
+# Two steps, both against ktp_hitreg_quality (KTPHLStatsX migration 036):
+#   1. score every finished (match, half) that carries target state
+#      (ktp_stats_shot_detail on -- 12-mans by default) and has no row yet.
+#      One INSERT ... SELECT per run, capped at 25 halves so the first run over
+#      a backlog is bounded; idx_damage_pair makes each lookup a seek.
+#   2. read the trailing window and latch on misses per thousand -- tenths of
+#      a percent, because the latch compares integers and the interesting
+#      band is 99.0-99.9%. Warn at 10 (1.0% missed), clear at 5 (0.5%), and
+#      only once 300 clean hits have landed so one lost row in a short half
+#      does not page.
+#   A third item, hitreg-reg=stale, fires when 12-mans finished in the last
+#   7 days but none produced a scorable half: shot detail off, a build that
+#   stopped emitting tgt_* fields, or the daemon dropping them all read as
+#   "quiet", never as clean. Rule: a watcher that can go blind must say so.
+#
+# >>> ktp-hitreg-reg — extracted verbatim by tests/unit/test_health_hitreg.py
+HITREG_WARN_PERMILLE="${HITREG_WARN_PERMILLE:-10}"
+HITREG_CLEAR_PERMILLE="${HITREG_CLEAR_PERMILLE:-5}"
+HITREG_MIN_CLEAN="${HITREG_MIN_CLEAN:-300}"
+HITREG_WINDOW_HOURS="${HITREG_WINDOW_HOURS:-48}"
+HITREG_STALE_DAYS="${HITREG_STALE_DAYS:-7}"
+HITREG_SCORE_LIMIT="${HITREG_SCORE_LIMIT:-25}"
+# stdin:  clean<TAB>registered<TAB>halves, one row (mysql -N -B). Empty/NULL
+#         sums (no scorable half in the window) read as zeros.
+# stdout: missed_permille<TAB>clean<TAB>registered<TAB>halves, only once
+#         clean reaches the floor; rounded to an integer for `latched`.
+hitreg_reg_rows() {
+    awk -F'\t' -v min="$HITREG_MIN_CLEAN" '
+        NF >= 3 && $1 != "NULL" && $1+0 >= min {
+            printf "%d\t%d\t%d\t%d\n", int(1000*($1-$2)/$1 + 0.5), $1, $2, $3 }'
+}
+# <<< ktp-hitreg-reg
+
+# Step 1: score unscored halves. Same root socket and the same failure
+# posture as capture-loss: a missing table or revoked grant is a down item,
+# not a silent skip that reads as healthy forever.
+if ! mysql hlstatsx -N -B -e "
+        INSERT INTO ktp_hitreg_quality
+            (match_id, half, server_id, match_end, clean_hits, registered_300ms,
+             registered_1s, dead_target_hits, teammate_hits)
+        SELECT c.match_id, c.half, c.server_id, c.match_end,
+               SUM(s.tgt_dead = 0 AND s.tgt_team <> s.shooter_team
+                   AND (COALESCE(s.trace_flags, 0) & 15) = 0 AND s.tgt_player_id IS NOT NULL),
+               SUM(s.tgt_dead = 0 AND s.tgt_team <> s.shooter_team
+                   AND (COALESCE(s.trace_flags, 0) & 15) = 0 AND s.tgt_player_id IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM ktp_damage_events d
+                               WHERE d.match_id = s.match_id AND d.attacker_id = s.player_id
+                                 AND d.victim_id = s.tgt_player_id
+                                 AND d.game_time BETWEEN s.game_time - 0.30 AND s.game_time + 0.30)),
+               SUM(s.tgt_dead = 0 AND s.tgt_team <> s.shooter_team
+                   AND (COALESCE(s.trace_flags, 0) & 15) = 0 AND s.tgt_player_id IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM ktp_damage_events d
+                               WHERE d.match_id = s.match_id AND d.attacker_id = s.player_id
+                                 AND d.victim_id = s.tgt_player_id
+                                 AND d.game_time BETWEEN s.game_time - 1.0 AND s.game_time + 1.0)),
+               SUM(s.tgt_dead <> 0),
+               SUM(s.tgt_dead = 0 AND s.tgt_team = s.shooter_team)
+        FROM (SELECT m.match_id, m.half, m.server_id, m.end_time AS match_end
+              FROM ktp_matches m
+              WHERE m.end_time IS NOT NULL
+                AND m.end_time >= NOW() - INTERVAL 14 DAY
+                AND m.end_time <= NOW() - INTERVAL 10 MINUTE
+                AND NOT EXISTS (SELECT 1 FROM ktp_hitreg_quality q
+                                WHERE q.match_id = m.match_id AND q.half = m.half)
+                AND EXISTS (SELECT 1 FROM ktp_shot_events s0
+                            WHERE s0.match_id = m.match_id AND s0.half = m.half
+                              AND s0.tgt_dead IS NOT NULL)
+              ORDER BY m.end_time LIMIT ${HITREG_SCORE_LIMIT}) c
+        JOIN ktp_shot_events s ON s.match_id = c.match_id AND s.half = c.half
+        WHERE s.tgt_dead IS NOT NULL
+        GROUP BY c.match_id, c.half, c.server_id, c.match_end
+        ON DUPLICATE KEY UPDATE id = id" 2>/dev/null; then
+    down+=("hitreg-reg=query-failed")
+fi
+
+# Step 2: the trailing window, and staleness against the matches that should
+# have been scorable. match_type 2 is KTPMatchHandler's 12-man -- the type the
+# fleet runs shot detail on (bitmask 4 = 1 << 2).
+if hitreg_row=$(mysql hlstatsx -N -B -e "
+        SELECT SUM(clean_hits), SUM(registered_300ms), COUNT(*)
+        FROM ktp_hitreg_quality
+        WHERE match_end >= NOW() - INTERVAL ${HITREG_WINDOW_HOURS} HOUR" 2>/dev/null); then
+    while IFS=$'\t' read -r missed clean registered halves; do
+        if [ -z "${missed:-}" ]; then continue; fi
+        echo "[$now_ts] hitreg: $((clean - registered))/${clean} clean live-enemy hits with no damage row within 300ms (${missed} per 1000) over ${halves} half(s), ${HITREG_WINDOW_HOURS}h"
+        key="hitreg-reg"
+        if latched "$key" "$missed" "$HITREG_WARN_PERMILLE" "$HITREG_CLEAR_PERMILLE"; then
+            down+=("$key"); detail[$key]="${missed} per 1000 clean live-enemy hits produced no damage row within 300ms (${clean} hits, ${halves} half(s), last ${HITREG_WINDOW_HOURS}h) -- normal is under 2"
+        fi
+    done <<< "$(printf '%s\n' "$hitreg_row" | hitreg_reg_rows)"
+    if stale=$(mysql hlstatsx -N -B -e "
+            SELECT (SELECT COUNT(*) FROM ktp_matches
+                    WHERE match_type = 2 AND end_time >= NOW() - INTERVAL ${HITREG_STALE_DAYS} DAY),
+                   (SELECT COUNT(*) FROM ktp_hitreg_quality
+                    WHERE clean_hits > 0 AND match_end >= NOW() - INTERVAL ${HITREG_STALE_DAYS} DAY)" 2>/dev/null); then
+        IFS=$'\t' read -r twelve_mans scorable <<< "$stale"
+        if [ "${twelve_mans:-0}" -gt 0 ] && [ "${scorable:-0}" -eq 0 ]; then
+            down+=("hitreg-reg=stale"); detail["hitreg-reg=stale"]="${twelve_mans} 12-man half(s) finished in the last ${HITREG_STALE_DAYS}d and none carried scorable shot detail -- the emitter, the flag, or the daemon stopped, and registration is unmeasured"
+        fi
+    fi
+else
+    down+=("hitreg-reg=query-failed")
+fi
+
 # ---- Build sorted lists for set comparison ----
 # curr.list: sorted, deduplicated set of currently-down items
 # prev.list: read at the top of the run, because the disk checks latch on it
