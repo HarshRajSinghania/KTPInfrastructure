@@ -1232,3 +1232,69 @@ def test_damage_ledger_check_only_queries_wave1_columns_when_migrated():
     assert assertions.check_damage_ledger(new, emitted=5)["status"] == "ok"
     assert "damage_applied > damage" in new.violations_query
     assert "health_after > health_before" in new.violations_query
+
+
+class HitRegDb(FakeDb):
+    """Target-state column present or not; N detail rows; one (clean, registered) window row."""
+
+    def __init__(self, *, has_target: bool = True, detail_rows: int = 120,
+                 clean: int = 102, registered: int = 102):
+        super().__init__()
+        self._has_target, self._detail_rows = has_target, detail_rows
+        self._clean, self._registered = clean, registered
+        self.rate_query = None
+
+    def count(self, query):
+        if "information_schema.COLUMNS" in query:
+            return 1 if self._has_target else 0
+        if "tgt_dead IS NOT NULL" in query:
+            return self._detail_rows
+        return 0
+
+    def sql(self, query):
+        self.rate_query = query
+        return "clean_hits\tregistered\n%d\t%d\n" % (self._clean, self._registered)
+
+
+def _hitreg(db, **kw):
+    return assertions.check_hit_registration(db, match_id="1789521063-TEST", half=1, **kw)
+
+
+def test_hit_registration_passes_at_the_measured_bot_figure():
+    """Run 35042631421: 102/102 clean live-enemy bot hits registered."""
+    db = HitRegDb(clean=102, registered=102)
+    v = _hitreg(db)
+    assert v["status"] == "ok" and v["clean"] == 102
+    # The clean-hit predicate is the investigation's, verbatim: live target,
+    # opposing team, no trace flag, resolved victim, 300 ms damage window.
+    q = db.rate_query
+    for needle in ("tgt_dead = 0", "tgt_team <> s.shooter_team", "& 15) = 0",
+                   "tgt_player_id IS NOT NULL", "BETWEEN s.game_time - 0.30",
+                   "s.match_id = '1789521063-TEST'", "s.half = 1"):
+        assert needle in q, needle
+
+
+def test_hit_registration_tolerates_the_residual_but_not_a_step():
+    # One attribution edge in 102 hits is the 0.1% residual writ large on a
+    # bot sample; it must not fail the lane.
+    assert _hitreg(HitRegDb(clean=102, registered=101))["status"] == "ok"
+    # Losing one hit in twenty is a registration defect, whatever the sample.
+    v = _hitreg(HitRegDb(clean=102, registered=96))
+    assert v["status"] == "pipeline"
+    assert "94.1%" in v["detail"] and "floor is 98%" in v["detail"]
+
+
+def test_hit_registration_is_not_exercised_without_target_state():
+    """Shot detail off leaves every tgt_* NULL. That is a coverage gap, not a
+    pass and not a failure -- the lane did not test what it set out to."""
+    v = _hitreg(HitRegDb(detail_rows=0))
+    assert v["status"] == "not_exercised" and "--shot-detail 1" in v["detail"]
+    v = _hitreg(HitRegDb(has_target=False))
+    assert v["status"] == "not_exercised" and "migrate_030" in v["detail"]
+    assert assertions.check_hit_registration(HitRegDb(), match_id=None, half=None)["status"] == "not_exercised"
+
+
+def test_hit_registration_needs_enough_hits_to_judge_a_rate():
+    v = _hitreg(HitRegDb(clean=30, registered=28))
+    assert v["status"] == "not_exercised" and "under the 50" in v["detail"]
+    assert _hitreg(HitRegDb(clean=30, registered=28), min_clean=20)["status"] == "pipeline"
