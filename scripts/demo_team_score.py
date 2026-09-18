@@ -354,6 +354,7 @@ def build_import_sql(rows: Sequence[TeamScoreObservation], manifests: Sequence[D
             _sql_text(r.observation_kind), _sql_text(r.retention_class),
             _sql_binary(r.manifest_content_sha256), _sql_text(r.raw_event_json), _sql_binary(r.raw_event_sha256),
             _sql_binary(r.source_file_sha256), _sql_binary(r.source_path_sha256),
+            str(r.source_line_number),
         )) + ")")
     mcols = ("match_id,map_name,match_type,source_server,producer,observer_started_at,observer_ended_at,"
              "terminal_half,event_count,official_row_count,retained_row_count,lifecycle_complete,settlement_seconds,"
@@ -362,7 +363,7 @@ def build_import_sql(rows: Sequence[TeamScoreObservation], manifests: Sequence[D
     rcols = ("match_id,match_type,half,map_name,source_server,tick_seconds,event_sequence,observed_at,"
              "allies_score,axis_score,allies_team_id,axis_team_id,source,source_version,producer,"
              "observation_kind,retention_class,manifest_content_sha256,raw_event_json,raw_event_sha256,"
-             "source_file_sha256,source_path_sha256")
+             "source_file_sha256,source_path_sha256,source_line_number")
     return f"""
 SELECT GET_LOCK('{LEDGER_LOCK}',30) INTO @ktp_demo_ts_lock;
 START TRANSACTION;
@@ -413,7 +414,8 @@ CREATE TEMPORARY TABLE `ktp_demo_ts_row_stage` (
   `raw_event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   `raw_event_sha256` BINARY(32) NOT NULL,
   `source_file_sha256` BINARY(32) NOT NULL,
-  `source_path_sha256` BINARY(32) NOT NULL
+  `source_path_sha256` BINARY(32) NOT NULL,
+  `source_line_number` BIGINT UNSIGNED NOT NULL
 ) ENGINE=InnoDB;
 INSERT INTO `ktp_demo_ts_row_stage` VALUES
 {",".join(rvals)};
