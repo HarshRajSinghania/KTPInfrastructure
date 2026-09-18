@@ -1,0 +1,19 @@
+[Unit]
+Description=Push the daily fleet performance rollup to the site, hourly
+
+[Timer]
+# Hourly against a daily source, at :40 so the first run after ktp-perf-rollup
+# (04:30 ET) carries that morning's rows rather than waiting a day for them.
+#
+# Hourly, not daily, for two reasons: the payload replaces a single stored
+# document, so a run costs one small query and one small POST and a failed push
+# heals on the next tick instead of leaving the panel a day behind; and the
+# delivery stamp doubles as the heartbeat that says this producer is alive.
+# What it cannot say is whether the ROLLUP is alive -- the payload carries
+# source_computed_at for that, and the reader must judge the content by it.
+OnCalendar=*:40
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
