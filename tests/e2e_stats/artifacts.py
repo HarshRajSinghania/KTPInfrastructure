@@ -108,6 +108,7 @@ DEFAULT_SCHEMA_FILES = (
     "sql/migrate_032_wave1_additive_fields.sql",
     "sql/migrate_033_wave2_streams.sql",
     "sql/migrate_034_grenade_throw_events.sql",
+    "sql/migrate_035_capture_health_repaired.sql",
 )
 
 DEFAULT_SEED_FILES = (
