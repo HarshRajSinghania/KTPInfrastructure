@@ -690,6 +690,8 @@ def cmd_import_mmr(args: argparse.Namespace) -> int:
             print(f"refusing: {problem}")
         return 1
     players = payload["players"]
+    # validate_for_import has already asserted payload["kind"] == AGGREGATE_KIND.
+    kind = MMRP.AGGREGATE_KIND
 
     db = LocalMysql()
     body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
