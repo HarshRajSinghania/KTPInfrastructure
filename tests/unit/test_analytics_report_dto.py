@@ -476,8 +476,8 @@ class Sanitize(unittest.TestCase):
         ph = sanitize_report(internal_report())["player_halves"]
         self.assertEqual((ph["status"], ph["rows"]), ("unavailable", []))
 
-    def test_contract_is_v1_3_0(self):
-        self.assertEqual(CONTRACT_VERSION, "analytics-report-dto-v1.3.0")
+    def test_contract_is_v1_5_0(self):
+        self.assertEqual(CONTRACT_VERSION, "analytics-report-dto-v1.5.0")
 
     def test_player_halves_carry_side_and_best_streak(self):
         rep = internal_report()

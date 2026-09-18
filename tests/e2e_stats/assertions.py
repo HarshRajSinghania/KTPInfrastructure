@@ -950,9 +950,24 @@ def check_damage_ledger(db, *, emitted: int) -> dict:
                 "ktp_damage_events does not exist -- migrate_006 was not applied "
                 "to this database, so the ledger was not exercised this run."}
     rows = db.count("SELECT COUNT(*) FROM ktp_damage_events")
+    # Wave 1 (migration 032): applied damage is clamp(before - after, 0,
+    # damage) on the producer, so it can never exceed damage or go negative,
+    # and a hit never raises health. NULL (pre-wave-1 producer) compares
+    # false and is not a violation. The corpus lane replays against a schema
+    # pinned at migration 022, so the clause is only added when the column
+    # exists -- same tolerance as the table check above.
+    wave1_cols = db.count(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ktp_damage_events' "
+        "AND COLUMN_NAME = 'damage_applied'"
+    ) > 0
+    wave1_where = (
+        "OR damage_applied > damage OR damage_applied < 0 "
+        "OR health_after > health_before"
+    ) if wave1_cols else ""
     violations = db.count(
         "SELECT COUNT(*) FROM ktp_damage_events "
-        "WHERE damage_capped > 100 OR damage_capped > damage"
+        f"WHERE damage_capped > 100 OR damage_capped > damage {wave1_where}"
     )
     if emitted == 0:
         return {"code": "damage_ledger", "status": "not_exercised", "emitted": 0,
@@ -962,8 +977,9 @@ def check_damage_ledger(db, *, emitted: int) -> dict:
     if violations > 0:
         return {"code": "damage_ledger", "status": "pipeline", "emitted": emitted,
                 "rows": rows, "cap_violations": violations, "detail":
-                f"{violations} row(s) with damage_capped > 100 or "
-                f"damage_capped > damage — the cap is a plugin-side "
+                f"{violations} row(s) with damage_capped > 100, "
+                f"damage_capped > damage, damage_applied outside 0..damage, or "
+                f"health_after > health_before — the cap is a plugin-side "
                 f"MIN(damage, 100), so a violation here is a real defect in "
                 f"that logic, not a coverage gap. Should never happen "
                 f"regardless of weapon or hitzone."}
@@ -1858,7 +1874,8 @@ SELECT COUNT(*) FROM ktp_capture_health
 WHERE BINARY match_id=BINARY {literal} AND half={int(half)}
   AND (event_type NOT IN ('life','damage','position','frag','assist','break',
                           'flag_state','flag_position','objective_attempt',
-                          'grenade_entity','team_membership','shot')
+                          'grenade_entity','team_membership','shot',
+                          'score','duel','player_state','grenade_throw')
        OR attempted IS NULL OR attempted < 0
        OR enqueued IS NULL OR enqueued < 0
        OR dropped IS NULL OR dropped < 0

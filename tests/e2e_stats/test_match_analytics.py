@@ -175,3 +175,72 @@ def test_markdown_states_positional_privacy_without_player_locations():
     assert "Private per-player objective" in rendered
     assert "position_samples" not in rendered
     assert "pos_x" not in rendered
+
+
+def test_attach_wave_facts_keeps_none_for_old_producers_and_zero_for_no_score():
+    players = [{"player_id": 1}, {"player_id": 2}]
+    # Source absent entirely: every wave key present, every value None.
+    analytics.attach_wave_facts(players, None, None)
+    assert all(players[0][k] is None for k in analytics.WAVE_PLAYER_KEYS)
+    # Wave 1 queried but player 2's producer predates 1.21.0 (NULL row), and
+    # score queried but player 2 scored nothing (no row) -- None vs 0.
+    analytics.attach_wave_facts(
+        players,
+        [{"player_id": 1, "damage_applied": 340, "life_shots": 120,
+          "life_shots_hitscan": 118, "first_shot_delay_avg": 4.5,
+          "damage_capped_with_applied": 400, "hits_with_applied": 12, "lives_fired": 9},
+         {"player_id": 2, "damage_applied": None, "life_shots": None,
+          "life_shots_hitscan": None, "first_shot_delay_avg": None,
+          "damage_capped_with_applied": None, "hits_with_applied": 0, "lives_fired": 0}],
+        [{"player_id": 1, "score_events": 3, "score_points": 5,
+          "score_points_placed": 4, "score_events_unresolved": 1}],
+    )
+    assert players[0]["damage_applied"] == 340 and players[0]["score_points"] == 5
+    assert players[1]["damage_applied"] is None
+    assert players[1]["score_points"] == 0
+
+
+def test_wave_markdown_says_why_when_no_wave_data():
+    report = {"players": [{"player_id": 1, "player_name_at_match": "a",
+                           "team_name": "Allies", "damage_applied": None,
+                           "life_shots": None, "score_points": None}],
+              "duel_stats": None}
+    lines = analytics.wave_markdown(report)
+    assert len(lines) == 1 and "1.21.0" in lines[0]
+    report["players"][0]["damage_applied"] = 12
+    lines = analytics.wave_markdown(report)
+    assert any("| a |" in line for line in lines)
+    assert any("Duel stats: not available" in line for line in lines)
+
+
+def test_attach_wave_facts_grenade_throws_none_vs_zero():
+    players = [{"player_id": 1}, {"player_id": 2}]
+    analytics.attach_wave_facts(players, None, None, None)
+    assert players[0]["grenade_throws"] is None
+    analytics.attach_wave_facts(
+        players, None, None,
+        [{"player_id": 1, "grenade_throws": 6, "grenade_bursts_matched": 6,
+          "grenade_flight_avg": 3.1, "grenade_cooked": 4}],
+    )
+    assert players[0]["grenade_cooked"] == 4
+    assert players[1]["grenade_throws"] == 0 and players[1]["grenade_flight_avg"] is None
+
+
+def test_attach_aim_facts_is_none_when_unmeasured():
+    players = [{"player_id": 1}, {"player_id": 2}]
+    analytics.attach_aim_facts(players, None, None)
+    assert all(players[0][k] is None for k in analytics.AIM_PLAYER_KEYS)
+    analytics.attach_aim_facts(
+        players,
+        [{"player_id": 1, "placement_shots": 40, "placement_avg_deg": 12.5,
+          "placement_under5_pct": 40.0, "placement_under15_pct": 70.0}],
+        [{"player_id": 2, "ac_hits_with_geometry": 9, "ac_err_avg_deg": 1.8,
+          "ac_range_avg": 500, "ac_target_angvel_avg_dps": 6.0}],
+    )
+    assert players[0]["placement_avg_deg"] == 12.5 and players[0]["ac_err_avg_deg"] is None
+    # No shots is "not measured", not zero degrees.
+    assert players[1]["placement_shots"] is None and players[1]["ac_err_avg_deg"] == 1.8
+    lines = analytics.aim_markdown({"players": [dict(p, player_name_at_match="p", team_name="Allies")
+                                                for p in players]})
+    assert any("| p |" in line for line in lines)
+    assert len(analytics.aim_markdown({"players": [{"player_id": 3}]})) == 1

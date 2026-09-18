@@ -60,6 +60,24 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def sides_by_half(life_boundaries: Sequence[dict[str, Any]] | None,
+                  ) -> dict[int, dict[int, int]]:
+    """(half -> player_id -> engine side) from life boundaries.
+
+    Flag ``owner_team`` is the engine side of that half, while the roster's
+    ``team`` is the side held in the LAST half played (ktp_match_players is
+    overwritten each half). Sides swap between halves, so without this map
+    every half-1 flag delta points the wrong way against the alive term.
+    """
+    sides: dict[int, dict[int, int]] = {}
+    for row in life_boundaries or []:
+        half, pid = _int_or_none(row.get("half")), _int_or_none(row.get("player_id"))
+        team = _int_or_none(row.get("team"))
+        if half and pid is not None and team in (1, 2):
+            sides.setdefault(half, {})[pid] = team
+    return sides
+
+
 class _HalfState:
     """Mutable half state: flag owners and alive sets, allies-perspective."""
 
@@ -159,6 +177,7 @@ def build_flag_swing_shadow(
     if not teams:
         envelope["status"] = "unavailable"
         return envelope
+    sides = sides_by_half(life_boundaries)
     spawn_ownership = spawn_ownership or {}
     flag_ids = ({ _int_or_none(r.get("flag_index"))
                  for r in flag_states } | set(spawn_ownership)) - {None}
@@ -206,7 +225,7 @@ def build_flag_swing_shadow(
             state = _HalfState(len(flag_ids) or 5, len(teams), config,
                                 initial_owners=spawn_ownership)
             for pid in teams:
-                state.teams[pid] = teams[pid]
+                state.teams[pid] = sides.get(half, {}).get(pid, teams[pid])
                 state.alive[pid] = True
         assert state is not None
         before = state.p_allies()
@@ -228,7 +247,7 @@ def build_flag_swing_shadow(
             share = delta / len(credited) if credited else 0.0
             for pid in credited:
                 if pid in swing_by_player:
-                    team_sign = 1.0 if teams.get(pid) == 1 else -1.0
+                    team_sign = 1.0 if state.teams.get(pid) == 1 else -1.0
                     swing_by_player[pid] += share * team_sign
             if abs(delta) > 1e-9 and not bool(row.get("is_initial")):
                 timeline.append({
@@ -241,7 +260,7 @@ def build_flag_swing_shadow(
             victim = _int_or_none(row.get("victim_id"))
             killer = _int_or_none(row.get("killer_id"))
             if victim in state.alive:
-                killer_team = teams.get(killer)
+                killer_team = state.teams.get(killer)
                 advantage = (state.alive_count(killer_team)
                              - state.alive_count(1 if killer_team == 2 else 2)
                              ) if killer_team in (1, 2) else 0

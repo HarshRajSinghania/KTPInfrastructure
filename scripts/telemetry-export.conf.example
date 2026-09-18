@@ -1,0 +1,18 @@
+# KTP telemetry exporter - read by /usr/local/bin/ktp-telemetry-export.py
+#
+# Copy to /etc/ktp/telemetry-export.conf, mode 600, and fill in. The repo carries
+# only this template; nothing here is a real value.
+#
+# TELEMETRY_INGEST_SECRET must match the site environment variable of the same
+# name, on BOTH the production and preview rows -- an unset value there fails
+# closed with 503 and a mismatch fails with 401, and neither is visible from
+# this end beyond the status this script prints.
+
+TELEMETRY_INGEST_URL=https://__SITE_HOST__/api/internal/telemetry/baselines
+TELEMETRY_INGEST_SECRET=__PLACEHOLDER__
+
+# Reader for hlstatsx.ktp_telemetry_baselines. SELECT on that one table is the
+# whole requirement; do not reuse an account that can write it, because the
+# rollup is the only thing that should.
+TELEMETRY_DB_USER=support_web
+TELEMETRY_DB_PASS=__PLACEHOLDER__

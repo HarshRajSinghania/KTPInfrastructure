@@ -1,0 +1,178 @@
+{
+"file": "ktp_1789326983-NY4_h1-2609131503-dod_thunder2.dem",
+"players": [
+{
+"deaths": 24,
+"id": "STEAM_0:1:4385271",
+"kills": 16,
+"lifespan": {
+"avg": "40s 471ms 889us 648ns",
+"max": "2m 11s 406ms 250us",
+"min": "11s 861ms 938us 476ns"
+},
+"name": "uD. RED",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:1:3666589",
+"kills": 19,
+"lifespan": {
+"avg": "36s 495ms 204us 45ns",
+"max": "1m 16s 457ms 31us 250ns",
+"min": "15s 671ms 997us 70ns"
+},
+"name": "uD.Beirinha 8)",
+"score": 1,
+"team": "allies"
+},
+{
+"deaths": 19,
+"id": "STEAM_0:0:928762988",
+"kills": 23,
+"lifespan": {
+"avg": "50s 840ms 823us 364ns",
+"max": "2m 39s 248ms 901us 367ns",
+"min": "10s 216ms 64us 453ns"
+},
+"name": "uD.Jiraiya",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:0:3965896",
+"kills": 19,
+"lifespan": {
+"avg": "57s 413ms 611us 518ns",
+"max": "2m 50s 71ms 960us 449ns",
+"min": "11s 835ms 571us 289ns"
+},
+"name": "uD. SuEcOz",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 21,
+"id": "STEAM_0:0:4420226",
+"kills": 19,
+"lifespan": {
+"avg": "45s 180ms 916us 526ns",
+"max": "1m 56s 466ms 918us 945ns",
+"min": "14s 245ms 971us 680ns"
+},
+"name": "uD.xapZ",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:12636236",
+"kills": 17,
+"lifespan": {
+"avg": "42s 194ms 306us 746ns",
+"max": "1m 32s 106ms 933us 593ns",
+"min": "18s 919ms 6us 348ns"
+},
+"name": "uD.az.PERUANO",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:0:240688274",
+"kills": 30,
+"lifespan": {
+"avg": "58s 337ms 415us 907ns",
+"max": "3m 4s 86ms 59us 570ns",
+"min": "9s 423ms 95us 703ns"
+},
+"name": "Pizzahut on 'shrooms",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:2034456",
+"kills": 15,
+"lifespan": {
+"avg": "41s 809ms 501us 648ns",
+"max": "1m 25s 579ms 956us 55ns",
+"min": "17s 576ms 660us 156ns"
+},
+"name": "CLT on 'shrooms",
+"score": 2,
+"team": "axis"
+},
+{
+"deaths": 16,
+"id": "STEAM_0:0:38008",
+"kills": 31,
+"lifespan": {
+"avg": "1m 1s 803ms 696us 576ns",
+"max": "2m 41s 619ms 628us 906ns",
+"min": "20s 268ms 981us 934ns"
+},
+"name": "wUa``on 'shrooms",
+"score": 0,
+"team": "axis"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:0:20602730",
+"kills": 21,
+"lifespan": {
+"avg": "58s 307ms 257us 758ns",
+"max": "2m 34s 890ms 380us 859ns",
+"min": "24s 833ms 7us 812ns"
+},
+"name": "Manga; sX on 'shrooms",
+"score": 0,
+"team": "axis"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:0:708554",
+"kills": 21,
+"lifespan": {
+"avg": "53s 941ms 297us 29ns",
+"max": "1m 44s 106ms 933us 594ns",
+"min": "20s 833ms 984us 375ns"
+},
+"name": "Ana on 'shrooms",
+"score": 0,
+"team": "axis"
+},
+{
+"deaths": 0,
+"id": "CONNECTION_24",
+"kills": 0,
+"lifespan": {
+"avg": "20m 3s 985ms 46us 387ns",
+"max": "20m 3s 985ms 46us 387ns",
+"min": "20m 3s 985ms 46us 387ns"
+},
+"name": "Player 24",
+"score": 0,
+"team": null
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:2536538",
+"kills": 10,
+"lifespan": {
+"avg": "37s 874ms 507us 23ns",
+"max": "1m 40s 137ms 84us 960ns",
+"min": "17s 747ms 70us 312ns"
+},
+"name": "evans on 'shrooms",
+"score": 3,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 3,
+"axis": 79
+}
+}
