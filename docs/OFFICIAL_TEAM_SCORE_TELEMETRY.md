@@ -59,77 +59,18 @@ The order is always 023 then 032:
 If a table already holds rows when 032 runs, the column default backfills them
 with `KTPHudObserver` before the default is dropped.
 
-Each input must be a non-symlink `MATCH_ID/events.jsonl` with the producer's
-adjacent `MATCH_ID/metadata.json`. The metadata must own the same match, map,
-canonical match type, exact event count, and an explicitly allowlisted
-`sourceServer`; `endedAt` must be non-null and at least 30 seconds old. Both
-files are stat/read/restat checked so an append or replacement during import
-fails closed. The importer also requires matching, closed `ktp_matches` rows.
-The source literal by itself is not authentication.
+### HUD observer import: retired (2026-09-18)
 
-After that retained local or mounted pair has settled:
+`scripts/import_team_score_events.py` (the `events.jsonl` + `metadata.json` path
+written by KTPHudObserver) is removed. It produced 0 production rows across the
+first 9 S10 official matches; HLTV demos cover every official match instead.
+Rows now come from `scripts/import_demo_team_score.py` (`producer = hltv-demo`,
+migrations 033/034), run hourly by the `ktp-demo-publish.sh` labels hook on the
+data server. The `read_event_files` validator in `team_score_telemetry.py` stays:
+the Lane B e2e fixture and `in_game_result.py` still read observer-format files.
 
-```bash
-python3 scripts/import_team_score_events.py \
-  --defaults-extra-file /etc/ktp/team-score-client.cnf \
-  --database hlstatsx_lan \
-  --source-server-root denver-4-observer=/srv/hud-observer/matches \
-  /srv/hud-observer/matches/MATCH_ID/events.jsonl
-```
-
-The example above is the Denver-4 LAN deployment. **On the production data
-server the observer writes to `/opt/hud-observer/matches/MATCH_ID/`**, against
-database `hlstatsx`. The roots are per-deployment and the allowlist is exact, so
-use the path that deployment actually writes rather than assuming either
-example generalizes.
-
-Use `--validate-only` to perform the full source/schema/settlement validation
-without a database write. `--migrate` applies migrations 023 and 032 first,
-but production rollout should normally keep schema deployment as its own
-reviewed step. The importer uses the local MySQL client and local/mounted files;
-it contains no SSH or live-tail behavior.
-
-### Production (data server)
-
-Five rules, each one a way this command has been or could be run wrong:
-
-- **Always pass `--database hlstatsx`.** The default is the LAN schema,
-  `hlstatsx_lan`.
-- **Never pass `--migrate`.** Migration 023 is already applied to `hlstatsx`,
-  and schema changes go through the migration queue. Combined with the default
-  database, `--migrate` would create the ledger in the LAN schema and import
-  there, reporting success. The importer now refuses `--migrate` unless
-  `--database` is explicit.
-- **Apply migration 032 before the first import.** It goes through the queue
-  like any other schema change. Against a 023-only schema the importer fails on
-  the unknown `producer` column rather than writing unlabelled rows.
-- **Run `--validate-only` first.** It reads the files and never builds a MySQL
-  client, so it takes no lock and writes nothing. It also cannot check the
-  closed `ktp_matches` rows that the real import requires, so confirm those
-  separately.
-- **Pre-filter the inputs.** The first file that fails validation fails the
-  whole batch, and only settled matches carrying producer rows belong in it:
-
-```bash
-M=/opt/hud-observer/matches
-grep -l -F '"source":"engine-team-score-v1"' "$M"/*/events.jsonl
-```
-
-Pass one `--source-server-root "SOURCE_SERVER=$M"` for each distinct
-`sourceServer` in those files' `metadata.json`. The values contain spaces
-(`KTP - New York 1`), so quote them. Run the script from a checkout of `main`
-you have verified; a deployed copy on the box can lag behind it.
-
-Exact raw-row duplicates are idempotent. A different raw row at the same order
-key is never chosen arbitrarily or used to overwrite an incumbent: the key is
-audited in `ktp_team_score_ingest_conflicts`, future writes for that key remain
-blocked, and publication fails closed.
-
-Importer, projector, and scheduled retention all serialize on the same named
-MySQL ledger lock. Each operation uses one transaction; projection reads its
-manifest, observations, conflict evidence, and analytics lifecycle context in
-one consistent snapshot, while retention removes conflict evidence,
-observations, manifest, and match rows atomically.
+`ktp_team_score_observations` rows with `producer = KTPHudObserver` remain valid
+ledger rows; nothing here rewrites or purges them.
 
 ## Post-match projection
 
