@@ -286,7 +286,7 @@ Set them one lane at a time and watch a cycle.
 |---|---|---|
 | `crashreporter` (×5 hosts) | `page` | `1497957091107668070` |
 | `ktp-systemd-alert@` (`OnFailure=` on 21 units) | `page` | `1498813261263405097` |
-| `ktp-data-server-health.sh` | `page` | `1497957091107668070` |
+| `ktp-data-server-health.sh` | `page` / `recovery` | `1497957091107668070` — sources the helper since 2026-09-18; falls back to this id and today's colours when the helper is not deployed beside it, and logs `severity= lane= channel= via=` on every post |
 | `ktp-hltv-liveness.sh` | `page` | `CHANNEL_HLTV_STATUS` + `_EXTERNAL` |
 | `ktp-backup-watchdog.sh` | `page` | `PERF_ALERT_CHANNEL` |
 | `ktp-admin-bot` `ops_alerts` cog | `page` | `OPS_ALERT_CHANNEL_ID` = `1497957091107668070` |
