@@ -10,6 +10,12 @@ restart a crashed instance or restarts it but the process exits again
 immediately — without this alerter, the host can run degraded for hours
 before anyone notices.
 
+Since 2026-09-18 it also watches the host's disks — the filesystem holding
+`/home/dodserver` and `/` by default — for usage or inode percent crossing
+75%, clearing at 72%, one post per transition. These are the hosts that write
+demos, HLTV recordings and logs *during* a match, and until then nothing
+checked them; the data server has watched its own disks since May.
+
 ## Files
 
 | File | Purpose |

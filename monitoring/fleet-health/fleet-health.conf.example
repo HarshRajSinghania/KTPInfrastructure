@@ -39,3 +39,11 @@ RESTART_STATE_DIR=""
 # fault. Anything longer than the slowest restart on the host works; the cost of
 # raising it is only how late a genuinely unrestored cron is reported.
 RESTART_GRACE_MINUTES=10
+
+# Disk. The five game hosts write demos, HLTV recordings and logs during a
+# match; a full disk stops recording first and the server second. Default
+# mounts are the filesystem holding /home/dodserver plus /, deduplicated.
+# Thresholds and deadband match the data server's own disk check.
+#DISK_MOUNTS="/ /home"
+#DISK_PCT_WARN=75
+#DISK_PCT_CLEAR=72

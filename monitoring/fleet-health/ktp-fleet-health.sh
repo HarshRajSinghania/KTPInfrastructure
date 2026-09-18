@@ -26,6 +26,12 @@
 #                            nothing.
 #   RESTART_GRACE_MINUTES=10 — how long a stripped monitor cron is treated as a
 #                            restart in flight rather than a fault.
+#   DISK_MOUNTS=""         — mounts to watch, space-separated. Default: the
+#                            filesystem holding $HOME (where demos, HLTV
+#                            recordings and logs land) plus /, deduplicated.
+#   DISK_PCT_WARN=75       — usage or inode percent that opens a disk alert.
+#   DISK_PCT_CLEAR=72      — percent it must fall back under to close it. Same
+#                            deadband as the data server's own disk check.
 #
 # STATE (~/.ktp-fleet-health/state):
 #   CONSECUTIVE_BAD=N      — minutes consecutively below expected
@@ -34,6 +40,7 @@
 #   LAST_RUNNING=N
 #   CRON_STATE=armed|incomplete
 #   LAST_MONITOR_CRONS=N
+#   DISK_WARN_MOUNTS="..."  — mounts currently in the warned state
 #
 # CRON:
 #   * * * * * /home/dodserver/ktp-fleet-health.sh >/dev/null 2>&1
@@ -59,6 +66,9 @@ MENTION_USER_ID=""
 LOCATION=""
 RESTART_STATE_DIR=""       # auto-derives below if unset after config load
 RESTART_GRACE_MINUTES=10
+DISK_MOUNTS=""             # auto-derives below if unset after config load
+DISK_PCT_WARN=75
+DISK_PCT_CLEAR=72
 
 # Load configs (system first, then per-host)
 [ -r "$SYSTEM_CONFIG" ] && source "$SYSTEM_CONFIG"
@@ -97,6 +107,7 @@ RUNNING=$(pgrep -c hlds_linux 2>/dev/null) || true
 # Load state
 CONSECUTIVE_BAD=0
 ALERT_STATE=healthy
+DISK_WARN_MOUNTS=""
 [ -f "$STATE_FILE" ] && source "$STATE_FILE"
 
 # Update consecutive-bad counter
@@ -228,6 +239,65 @@ case "$CRON_VERDICT" in
         ;;
 esac
 
+# ---- Disk ----
+# The data server has watched its own disks since May; the five game hosts had
+# nothing, and they are the hosts that write demos, HLTV recordings and logs
+# DURING a match. A full disk here does not page -- it shows up as a server that
+# stopped recording, or one that crashed mid-half. Same thresholds and the same
+# deadband as the data server's check, so a value parked on the line does not
+# flap, and one post per transition like everything else in this file.
+#
+# >>> ktp-disk-gate
+# disk_gate <mount> <pct> <ipct> <warn> <clear> <was-warned:0|1>
+# Sets DISK_VERDICT=quiet|warn|clear. A non-numeric reading (df failed, mount
+# gone) is quiet, never a clear: a check that cannot read its evidence must not
+# report a recovery it did not observe.
+disk_gate() {
+    local mount=$1 pct=$2 ipct=$3 warn=$4 clear=$5 was=$6 worst
+    DISK_VERDICT=quiet
+    [[ $pct =~ ^[0-9]+$ ]] || return 0
+    [[ $ipct =~ ^[0-9]+$ ]] || ipct=0
+    worst=$pct
+    [ "$ipct" -gt "$worst" ] && worst=$ipct
+    if [ "$worst" -ge "$warn" ]; then
+        [ "$was" -eq 0 ] && DISK_VERDICT=warn
+    elif [ "$worst" -lt "$clear" ]; then
+        [ "$was" -eq 1 ] && DISK_VERDICT=clear
+    fi
+    return 0
+}
+# <<< ktp-disk-gate
+
+# Default mounts: whatever holds $HOME_DIR (the game trees), plus /. df -P
+# resolves the mount for a path; a host where both are one filesystem yields
+# one entry after the dedupe.
+if [ -z "$DISK_MOUNTS" ]; then
+    home_mount=$(df -P "$HOME_DIR" 2>/dev/null | awk 'NR==2 {print $6}') || true
+    DISK_MOUNTS=$(printf '%s\n' "${home_mount:-/}" "/" | sort -u | tr '\n' ' ')
+fi
+
+NEW_DISK_WARN=""
+for mount in $DISK_MOUNTS; do
+    read -r pct ipct < <(
+        { df -P -k "$mount" 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); printf "%s ", $5}';
+          df -P -i "$mount" 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}'; } ) || true
+    was=0
+    case " $DISK_WARN_MOUNTS " in *" $mount "*) was=1 ;; esac
+    disk_gate "$mount" "${pct:-}" "${ipct:-}" "$DISK_PCT_WARN" "$DISK_PCT_CLEAR" "$was"
+    case "$DISK_VERDICT" in
+        warn)
+            send_alert "💽 ${LOCATION} disk ${mount} at ${pct}% (inodes ${ipct:-?}%)" "Above ${DISK_PCT_WARN}%. Demos, HLTV recordings and logs land here; a full disk stops recording first and the server second. Check: df -h ${mount}; du -sh ~/dod-*/serverfiles/dod/*.dem 2>/dev/null | sort -h | tail" 16776960
+            was=1
+            ;;
+        clear)
+            send_alert "✅ ${LOCATION} disk ${mount} back to ${pct}%" "Below ${DISK_PCT_CLEAR}% again." 3066993
+            was=0
+            ;;
+    esac
+    [ "$was" -eq 1 ] && NEW_DISK_WARN="${NEW_DISK_WARN}${mount} "
+done
+DISK_WARN_MOUNTS=${NEW_DISK_WARN% }
+
 # State transitions
 if [ "$CONSECUTIVE_BAD" -ge "$THRESHOLD_MINUTES" ] && [ "$ALERT_STATE" = "healthy" ]; then
     PORTS_DOWN=$(down_ports)
@@ -261,4 +331,5 @@ LAST_RUN=$(date +%s)
 LAST_RUNNING=$RUNNING
 CRON_STATE=$CRON_STATE
 LAST_MONITOR_CRONS=$MONITOR_CRONS
+DISK_WARN_MOUNTS="$DISK_WARN_MOUNTS"
 EOF
