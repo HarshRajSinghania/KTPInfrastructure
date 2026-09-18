@@ -18,6 +18,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from scripts.flag_swing import sides_by_half
+
 
 @dataclass
 class FitResult:
@@ -55,12 +57,21 @@ def extract_half_samples(
     winner_team: int,
     *,
     flag_count: int | None = None,
+    initial_owners: dict[int, int] | None = None,
 ) -> list[tuple[float, float, int]]:
-    """(flag_term, alive_term, allies_won) at each event in one half."""
+    """(flag_term, alive_term, allies_won) at each event in one half.
+
+    ``winner_team`` is the ENGINE side that won this half (1 Allies, 2 Axis),
+    the same frame as flag ``owner_team``. Player sides come from the life
+    boundaries of this half (see flag_swing.sides_by_half); the roster's team
+    is only the fallback, since it is the side of the last half played.
+    """
     if winner_team not in (1, 2):
         return []
     teams = {int(p["player_id"]): p.get("team") for p in roster
              if p.get("team") in (1, 2)}
+    half_sides = sides_by_half(life_boundaries).get(half, {})
+    teams = {pid: half_sides.get(pid, team) for pid, team in teams.items()}
     if not teams:
         return []
     flags = {int(r["flag_index"]) for r in flag_states
@@ -83,7 +94,7 @@ def extract_half_samples(
             events.append((float(row["game_time"]), "spawn", row))
     events.sort(key=lambda item: item[0])
 
-    owners: dict[int, int] = {}
+    owners: dict[int, int] = dict(initial_owners or {})
     alive: dict[int, bool] = {pid: True for pid in teams}
     samples: list[tuple[float, float, int]] = []
     for _at, kind, row in events:
