@@ -1120,6 +1120,95 @@ WHERE sh.player_id IS NULL
                if scope_sql is not None else "")}
 
 
+def check_hit_registration(db, *, match_id: str | None, half: int | None,
+                           floor_pct: float = 98.0, min_clean: int = 50) -> dict:
+    """Did the server's own clean trace hits on live enemies turn into damage?
+
+    The 2026-09 hitreg investigation (HITREG_PHASE2_REMEASURE_20260918.md)
+    closed on this number: of the shot rows where the trace hit a live enemy
+    cleanly (tgt_dead = 0, tgt_team <> shooter_team, no trace flag,
+    tgt_player_id resolved), the share with a ktp_damage_events row for the
+    same attacker/victim within 300 ms. 99.9% on 12,204 real human hits;
+    100% on the 102 clean bot hits of the one Lane C run that had shot detail
+    on (35042631421). Production latches the same figure hourly from
+    ktp_hitreg_quality; this is the pre-deploy half of it, so a plugin,
+    daemon or engine change that stops hits registering fails the lane
+    instead of being found by the pager.
+
+    `floor_pct` is deliberately below the human figure: a bot half is a
+    hundred-odd clean hits, where one attribution edge case (the 0.1%
+    residual the investigation chose not to chase) is a whole percent, and a
+    check that flakes on that gets muted. 98% with `min_clean` 50 lets one
+    such row through under 100 hits and still catches anything real -- a
+    registration failure is not a few rows, it is a step.
+
+    Not exercised when the run carries no target state at all (shot detail
+    off for this match type -- pass --shot-detail 1) or too few clean hits
+    to judge; unscoped calls skip, same as check_shot_events.
+    """
+    if match_id is None:
+        return {"code": "hit_registration", "status": "not_exercised", "clean": 0,
+                "registered": 0, "detail":
+                "no match/half to bound the shot-to-damage join; corpus replay "
+                "has no single producer context."}
+    scope_sql = f"match_id = {_sql_literal(match_id)}"
+    scoped_s = f"s.match_id = {_sql_literal(match_id)}"
+    if half is not None:
+        scope_sql += f" AND half = {int(half)}"
+        scoped_s += f" AND s.half = {int(half)}"
+    column_exists = db.count(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ktp_shot_events' "
+        "AND COLUMN_NAME = 'tgt_player_id'"
+    ) > 0
+    if not column_exists:
+        return {"code": "hit_registration", "status": "not_exercised", "clean": 0,
+                "registered": 0, "detail":
+                "ktp_shot_events has no tgt_player_id -- migrate_030 was not "
+                "applied, so target state was not exercised this run."}
+    detail_rows = db.count(
+        f"SELECT COUNT(*) FROM ktp_shot_events WHERE {scope_sql} AND tgt_dead IS NOT NULL")
+    if detail_rows == 0:
+        return {"code": "hit_registration", "status": "not_exercised", "clean": 0,
+                "registered": 0, "detail":
+                "no shot row carries target state -- ktp_stats_shot_detail was "
+                "off for this match (pass --shot-detail 1), so registration "
+                "cannot be judged this run."}
+    out = db.sql(f"""
+SELECT COUNT(*) AS clean_hits,
+       COALESCE(SUM(EXISTS (
+           SELECT 1 FROM ktp_damage_events d
+           WHERE d.match_id = s.match_id AND d.attacker_id = s.player_id
+             AND d.victim_id = s.tgt_player_id
+             AND d.game_time BETWEEN s.game_time - 0.30 AND s.game_time + 0.30)), 0) AS registered
+FROM ktp_shot_events s
+WHERE {scoped_s}
+  AND s.tgt_dead = 0 AND s.tgt_player_id IS NOT NULL
+  AND s.tgt_team <> s.shooter_team AND (COALESCE(s.trace_flags, 0) & 15) = 0
+""").strip().splitlines()
+    clean, registered = (int(v) for v in out[1].split("\t")[:2]) if len(out) >= 2 else (0, 0)
+    if clean < min_clean:
+        return {"code": "hit_registration", "status": "not_exercised", "clean": clean,
+                "registered": registered, "detail":
+                f"{clean} clean live-enemy hit(s) in the match, under the "
+                f"{min_clean} needed to judge a rate; {detail_rows} target-state "
+                f"row(s) present. A longer --play-seconds gives the bots more "
+                f"shots at each other."}
+    pct = 100.0 * registered / clean
+    if pct < floor_pct:
+        return {"code": "hit_registration", "status": "pipeline", "clean": clean,
+                "registered": registered, "detail":
+                f"{registered}/{clean} clean live-enemy trace hits ({pct:.1f}%) "
+                f"produced a ktp_damage_events row for the same attacker/victim "
+                f"within 300 ms; floor is {floor_pct:.0f}% (production measures "
+                f"99.9%). The server's own trace says the bullet hit a live "
+                f"enemy and no damage followed -- a hit-registration or "
+                f"damage-pipeline defect, not play style."}
+    return {"code": "hit_registration", "status": "ok", "clean": clean,
+            "registered": registered, "detail":
+            f"{registered}/{clean} clean live-enemy hits registered ({pct:.1f}%)"}
+
+
 def assert_no_dropped_lines(log_text: str) -> None:
     """The plugin's ring buffer never overflowed.
 
