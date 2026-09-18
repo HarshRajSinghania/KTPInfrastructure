@@ -95,15 +95,20 @@ SET @m32_final_columns := (SELECT COUNT(*) FROM information_schema.COLUMNS
  AND TABLE_NAME IN ('ktp_team_score_observations','ktp_team_score_ingest_manifests')
  AND DATA_TYPE='varchar' AND CHARACTER_MAXIMUM_LENGTH=32 AND COLLATION_NAME='ascii_bin'
  AND IS_NULLABLE='NO' AND COLUMN_DEFAULT IS NULL);
-SET @m32_final_checks := (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS t
+-- Constrains the producer column and still admits KTPHudObserver, rather than
+-- pinning one clause: migration 033 widens both to IN (KTPHudObserver, hltv-demo).
+SET @m32_final_checks := (SELECT COUNT(*) FROM (
+ SELECT BINARY REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.CHECK_CLAUSE,
+    '`',''),' ',''),'(',''),')',''),CHAR(9),''),CHAR(10),''),CHAR(13),''),CHAR(92),''),
+    '_[A-Za-z0-9]+''','''') AS exact_clause
+ FROM information_schema.TABLE_CONSTRAINTS t
  JOIN information_schema.CHECK_CONSTRAINTS c
    ON c.CONSTRAINT_SCHEMA=t.CONSTRAINT_SCHEMA AND c.CONSTRAINT_NAME=t.CONSTRAINT_NAME
  WHERE t.CONSTRAINT_SCHEMA=DATABASE() AND t.CONSTRAINT_TYPE='CHECK' AND (
   (t.TABLE_NAME='ktp_team_score_observations' AND t.CONSTRAINT_NAME='chk_team_score_producer') OR
   (t.TABLE_NAME='ktp_team_score_ingest_manifests' AND t.CONSTRAINT_NAME='chk_team_score_manifest_producer'))
- AND BINARY REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.CHECK_CLAUSE,
-    '`',''),' ',''),'(',''),')',''),CHAR(9),''),CHAR(10),''),CHAR(13),''),CHAR(92),''),
-    '_[A-Za-z0-9]+''','''') = BINARY 'producer=''KTPHudObserver''');
+ ) p WHERE p.exact_clause LIKE BINARY 'producer%'
+   AND p.exact_clause LIKE BINARY '%''KTPHudObserver''%');
 SET @m32_ok := (@m32_final_columns=2 AND @m32_final_checks=2);
 SET @m32_ddl := IF(@m32_ok,'DO 0','SELECT * FROM ERROR_032_team_score_producer_column_or_check_incompatible');
 PREPARE m32_stmt FROM @m32_ddl; EXECUTE m32_stmt; DEALLOCATE PREPARE m32_stmt;
