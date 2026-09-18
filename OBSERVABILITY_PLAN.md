@@ -251,6 +251,16 @@ state-transition alerting and already alerts on the right channel per the
 Rule to hold to until §2.1 is properly scoped: **no new alerting
 implementations.** New checks become producers for an existing one.
 
+**Status 2026-09-18.** `scripts/ktp-alert-routing.sh` (90bbe10) is the shared
+helper; `ktp-data-server-health.sh` now routes through it — `page` on a new-down
+run, `recovery` on a clear, channel from `KTP_CHANNEL_PAGE` when the operator
+maps it and from the legacy id until then. Deliberately not FATAL when the
+helper is absent, unlike the liveness check: a deploy-order slip must not kill
+the one check that watches everything else. The remaining §2.1 items (disk
+warnings as an `ops-daily` digest line, the spike-digest cadence, the
+game-host `ktp-fleet-health.sh` that bypasses the relay) are listed in
+`ALERT_ROUTING.md` with their owners.
+
 ---
 
 ## Sequencing

@@ -106,6 +106,44 @@ BANLIST_STALE_SEC=900
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# Severity → glyph / colour / lane, decided in one place for every producer
+# (docs/runbooks/ALERT_ROUTING.md). Sourced when deployed beside this script.
+# Not FATAL when absent, unlike ktp-hltv-liveness.sh: this is the check that
+# watches everything else, and a deploy-order slip must not turn it into a
+# silent exit under MAILTO=''. The fallback in health_alert_route below is
+# today's behaviour, byte for byte.
+_routing="$(dirname "${BASH_SOURCE[0]}")/ktp-alert-routing.sh"
+if [ -r "$_routing" ]; then
+    . "$_routing"
+else
+    echo "[$(ts)] WARN: $_routing absent -- legacy colours and channel until it is deployed" >&2
+fi
+
+# >>> ktp-health-route — extracted verbatim by tests/unit/test_health_alert_route.py
+# health_alert_route <count-of-new-down-items>
+# Sets KTP_ALERT_SEVERITY, KTP_ALERT_GLYPH, KTP_ALERT_COLOR, KTP_ALERT_LANE,
+# KTP_ALERT_CHANNEL, KTP_ALERT_CHANNEL_SOURCE. A run with anything newly down
+# is a page; a run that only recovered is a recovery -- both on the page lane,
+# because the recovery belongs beside the page it ends. The channel comes from
+# the lane's env mapping when the operator has set one, and from ALERT_CHANNEL
+# otherwise, so until the mapping exists this posts exactly where it does now.
+health_alert_route() {
+    local n_new="$1"
+    if [ "$n_new" -gt 0 ]; then KTP_ALERT_SEVERITY=page; else KTP_ALERT_SEVERITY=recovery; fi
+    if declare -F ktp_alert_route >/dev/null 2>&1; then
+        ktp_alert_route "$KTP_ALERT_SEVERITY"
+        ktp_alert_channel "$KTP_ALERT_LANE" "$ALERT_CHANNEL"
+    else
+        # The helper is not deployed: the pre-routing constants, unchanged.
+        KTP_ALERT_GLYPH=''
+        KTP_ALERT_LANE='legacy'
+        KTP_ALERT_CHANNEL="$ALERT_CHANNEL"
+        KTP_ALERT_CHANNEL_SOURCE='fallback'
+        if [ "$KTP_ALERT_SEVERITY" = page ]; then KTP_ALERT_COLOR=15548997; else KTP_ALERT_COLOR=5763719; fi
+    fi
+}
+# <<< ktp-health-route
+
 # >>> ktp-run-ledger — extracted verbatim by tests/unit/test_health_run_ledger.py
 # Nothing watches this check; it IS the watcher, and a watcher that stops looks
 # exactly like a quiet estate (ALERT_COVERAGE.md hole 4). From #207 on 2026-08-31
@@ -817,21 +855,16 @@ if [ ${#down[@]} -gt 0 ]; then
     fi
 fi
 
-# KTP canonical colors — match perf-rollup, crashreporter, soak-verify, etc.
-# Pre-1.5.24 used raw hex (65280 / 16711680) which rendered as pure green/red
-# instead of the KTP brand colors. Aligning now so the data-server-health
-# embeds visually match the rest of the alert flow.
-KTP_GREEN=5763719
-KTP_RED=15548997
-color=$KTP_GREEN
-[ ${#new_down[@]} -gt 0 ] && color=$KTP_RED
+# Colour, glyph, lane and channel from the shared routing helper; see
+# health_alert_route above for what happens when it is not deployed yet.
+health_alert_route "${#new_down[@]}"
 
 payload=$(jq -n \
-    --arg ch "$ALERT_CHANNEL" \
-    --arg title '<:KTP:1002382703020212245> KTP Data Server Health' \
+    --arg ch "$KTP_ALERT_CHANNEL" \
+    --arg title "${KTP_ALERT_GLYPH:+$KTP_ALERT_GLYPH }<:KTP:1002382703020212245> KTP Data Server Health" \
     --arg desc "$desc" \
     --arg footer "ktp-data-server-health @ $(TZ=America/New_York date '+%Y-%m-%d %H:%M %Z')" \
-    --argjson color "$color" \
+    --argjson color "$KTP_ALERT_COLOR" \
     '{channelId: $ch, embeds: [{title: $title, description: $desc, color: $color, footer: {text: $footer}}]}')
 
 http=$(curl -sS -o /tmp/ktp-health-resp.txt -w "%{http_code}" \
@@ -844,5 +877,7 @@ if [ "$http" != "200" ] && [ "$http" != "204" ]; then
     echo "[$(ts)] state NOT saved — transitions will re-alert on the next run" >&2
 else
     save_state
-    echo "[$(ts)] alert posted (HTTP $http)"
+    # Routing decisions in the log, so "why did that land there" is answerable
+    # from this file rather than from Discord.
+    echo "[$(ts)] alert posted (HTTP $http) severity=$KTP_ALERT_SEVERITY lane=$KTP_ALERT_LANE channel=$KTP_ALERT_CHANNEL via=$KTP_ALERT_CHANNEL_SOURCE"
 fi
