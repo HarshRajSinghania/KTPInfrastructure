@@ -17,6 +17,12 @@ Three sources combined:
 Excluded buckets (allowed modification): overviews/*, flag models
 (w_aflag/gflag/wflag).
 
+Every entry carries a `stock` flag: is this path in Steam depot 31, i.e. does a clean
+install have it? Downstream that is what separates a player who deleted their footstep
+sounds from one who has never played a given custom map — both report "missing" and only
+one is worth an admin's time. The path list is checked in at
+scripts/data/dod-depot31-stock-paths.txt.
+
 First-person grenade viewmodels (v_grenade/v_mills/v_stick) were violations
 from 2026-07-07, left the manifest entirely on 2026-09-13 when the operator
 ruled them allowable, and came back the same day at severity "review" when that
@@ -234,6 +240,58 @@ def _check_weapon_families():
 
 
 _check_weapon_families()
+
+
+# --------------------------------------------------------------------------
+# Stock-file knowledge — what a clean Steam install actually has
+# --------------------------------------------------------------------------
+
+STOCK_PATHS_FILE = Path(__file__).resolve().parent / "data" / "dod-depot31-stock-paths.txt"
+
+# The depot ships 101 paths with upper-case characters and the fleet tree carries them
+# lower-cased, so a case-sensitive join calls the four *T.mdl player models non-stock.
+# The list has no case-collisions, so folding is lossless.
+_stock_cache = {}
+
+
+def load_stock_paths(path=None):
+    """dod/-relative stock paths, folded to lower case for comparison."""
+    path = Path(path or STOCK_PATHS_FILE)
+    key = str(path)
+    if key not in _stock_cache:
+        paths = set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                paths.add(line.replace("\\", "/").lower())
+        if not paths:
+            raise ValueError(f"stock path list is empty: {path}")
+        _stock_cache[key] = frozenset(paths)
+    return _stock_cache[key]
+
+
+def is_stock(path, stock):
+    return path.replace("\\", "/").lower() in stock
+
+
+# Origins the generator names itself, as opposed to following a map .res. An entry from
+# one of these is a claim that EVERY client has the file, so a non-stock one is a path
+# nothing can deliver: not in the depot, and not downloadable because no map asks for it.
+EXPLICIT_ORIGIN_PREFIX = "explicit_"
+
+
+def dead_entry_candidates(entries, stock):
+    """Explicit entries absent from the depot — dead on arrival, not merely uncommon.
+
+    p_bar and p_mp44 lived here for months. Both are on the fleet tree via a community
+    pack, so the generator hashed them happily and 681 of 682 client scans reported them
+    missing; the real p_barbu/p_barbd/p_stg44 went unhashed the whole time. A .res-derived
+    entry is deliberately NOT checked — a custom map asset is absent from the depot by
+    definition and reaches a player over FastDL when they play that map.
+    """
+    return sorted(e["path"] for e in entries
+                  if e.get("origin", "").startswith(EXPLICIT_ORIGIN_PREFIX)
+                  and not is_stock(e["path"], stock))
 
 
 # --------------------------------------------------------------------------
@@ -491,8 +549,28 @@ def build_manifest(ssh, dod_path, filelist_path):
     return entries
 
 
-def assemble_manifest(entries, source_server_label, dod_path):
+def assemble_manifest(entries, source_server_label, dod_path, stock_paths_file=None):
     entries.sort(key=lambda e: (e["category"], e.get("severity", "violation"), e["path"]))
+
+    # Stamped here rather than at the five emit sites, for the reason the emit sites
+    # already burned us once: four of them can never see the path a rule is about, so a
+    # stale one is invisible. One site, every entry, no exceptions.
+    #
+    # `stock` says the file is in Steam depot 31 — what a clean install has. It is the
+    # difference between "this player deleted their footstep sounds" and "this player has
+    # never played that custom map", which a bare missing-file list cannot express. It is
+    # NOT a severity and must not be read as one: plenty of non-stock entries are perfectly
+    # ordinary custom-map assets.
+    stock = load_stock_paths(stock_paths_file)
+    for e in entries:
+        e["stock"] = is_stock(e["path"], stock)
+    stock_count = sum(1 for e in entries if e["stock"])
+
+    dead = dead_entry_candidates(entries, stock)
+    if dead:
+        print(f"[build]   WARNING: {len(dead)} explicit entry/entries are not in Steam depot 31 — "
+              f"no client can have them and every scan will report them missing: {dead}",
+              file=sys.stderr)
 
     # Apply operator-curated alternate hashes. Logged so re-runs surface any
     # ALTERNATE_HASHES keys that no longer match a manifest path (typo / file
@@ -539,6 +617,11 @@ def assemble_manifest(entries, source_server_label, dod_path):
             "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "total_files": len(entries),
             "total_size_bytes": total_size,
+            "stock_files": stock_count,
+            # Carried in the artifact, not just shouted at whoever ran the build: a
+            # generation-time stderr line is gone the moment the terminal is, and the
+            # question "is this entry dead?" gets asked of the manifest months later.
+            "dead_entry_candidates": dead,
             "by_category": dict(cat_counts),
             "by_severity": dict(sev_counts),
             "sources": dict(src_counts),
@@ -618,6 +701,9 @@ def main():
         print(f"  total:     {meta['total_files']} files ({meta['total_size_bytes']/1024/1024:.1f} MB)",
               file=sys.stderr)
         print(f"  severity:  {meta['by_severity']}", file=sys.stderr)
+        print(f"  stock:     {meta['stock_files']}/{meta['total_files']} in Steam depot 31"
+              + (f"  ⚠ dead explicit entries: {meta['dead_entry_candidates']}"
+                 if meta["dead_entry_candidates"] else ""), file=sys.stderr)
         print(f"  category:  {meta['by_category']}", file=sys.stderr)
         print(f"  sources:   {meta['sources']}", file=sys.stderr)
         print(f"  output:    {out_path}", file=sys.stderr)
