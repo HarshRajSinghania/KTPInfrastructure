@@ -54,7 +54,7 @@ alerted but not remediated is fine, and is most of this estate.
 | HLTV proxy dies while its wrapper lives | yes | yes | no | `ktp-hltv-liveness.sh` — fail-streak plus alert cooldown |
 | HLTV proxy bound but never connected to its game server | **yes, new** | **yes, new** | no | `ktp-hltv-liveness.sh` alerts when a proxy's newest `auto_*` demo goes stale; `hltv-restart-all.sh` counts a proxy only once it has connected. Before this, a proxy answering `Not connected.` passed both |
 | HLTV instance coverage gap (27020-27044) | yes | yes | no | `ktp-data-server-health.sh`, hourly |
-| Host disk or inode exhaustion | **no** | **no** | no | **hole** — see below |
+| Host disk or inode exhaustion | yes | yes | no | `ktp-fleet-health.sh` disk leg (2026-09-18), per host, every minute, 75% warn / 72% clear on bytes or inodes — needs the per-host rollout to be live |
 | Configuration drift between hosts | yes | yes | no | `ktp-fleet-audit.sh`, Monday 05:00 ET, posts only NEW items |
 | `~/restart-all-servers.sh` / `~/status.sh` drift | yes | no | no | `ktp-restart-drift.py` — read-only, **run by hand only, on no schedule** |
 | Binary md5 drift from the repo baseline | yes | yes | no | fleet audit; **15 items open as of 2026-09-07** |
@@ -143,11 +143,10 @@ Cron-scheduled work is outside both mechanisms entirely:
 
 Ranked by what they would cost during Season 10.
 
-1. **No disk or inode alerting on the five game hosts.** The data server checks
-   both (`ktp-data-server-health.sh:236-237`). Nothing in this repo does the
-   same for the hosts that write demos and logs during a match. The May 2026
-   disk-full event is the shape of the cost. *(Repo-derived; a game host may
-   carry a local crontab this repo does not track — see Unverified.)*
+1. ~~**No disk or inode alerting on the five game hosts.**~~ Closed in the repo
+   2026-09-18: a disk leg in the per-minute `ktp-fleet-health.sh`, same
+   thresholds and deadband as the data server. **Open on the fleet** until the
+   changed script is rolled to all five hosts.
 2. ~~**`CRITICAL_TIMERS` is three entries against ten timers.**~~ Closed
    2026-09-16: all ten live timers bar the Monday reminder are listed.
 3. **`ktp-admin-bot` and `ktp-frag-diag-tail` have no detection path at all** —
