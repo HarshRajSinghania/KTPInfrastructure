@@ -49,5 +49,11 @@ if [ -x "$DOD_TOOLS" ] && [ -f "$INFRA_ROOT/scripts/import_demo_team_score.py" ]
         log "ERROR: winner-label import failed (archive pages are fine)"
     fi
 else
-    log "labels: skipped (need $DOD_TOOLS, $INFRA_ROOT/scripts/import_demo_team_score.py, $TEAM_SCORE_CNF)"
+    # Name only what is absent. Listing all three sent an investigator hunting two
+    # files that were present while one missing .cnf skipped the import for 11 runs.
+    missing=
+    [ -x "$DOD_TOOLS" ] || missing="$missing $DOD_TOOLS"
+    [ -f "$INFRA_ROOT/scripts/import_demo_team_score.py" ] || missing="$missing $INFRA_ROOT/scripts/import_demo_team_score.py"
+    [ -r "$TEAM_SCORE_CNF" ] || missing="$missing $TEAM_SCORE_CNF"
+    log "ERROR: labels skipped, missing:$missing (archive pages are fine)"
 fi
