@@ -30,7 +30,7 @@ from scripts.in_game_result import unavailable as in_game_unavailable
 from scripts.kill_streaks import DEFINITION as KILL_STREAK_DEFINITION
 from scripts.kill_streaks import DEFINITION_VERSION as KILL_STREAK_DEFINITION_VERSION
 
-CONTRACT_VERSION = "analytics-report-dto-v1.3.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
+CONTRACT_VERSION = "analytics-report-dto-v1.5.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
 
 # hlstatsx DATETIMEs are naive league-local time: the data server runs
 # America/New_York. The website column is timestamptz, which reads a naive
@@ -259,15 +259,7 @@ def sanitize_report(report: dict) -> dict:
         "players": [
             {"name": _name(p.get("player_name_at_match")),
              "team": p.get("team"), "team_name": p.get("team_name")}
-            | {k: _num(p.get(k)) for k in (
-                "kills", "deaths", "assists", "headshots", "team_kills",
-                "suicides", "damage_dealt", "damage_taken",
-                "damage_differential", "capture_credits", "cap_breaks",
-                "shots", "hits", "raw_accuracy", "kd_ratio",
-                "damage_per_minute", "kills_per_minute", "damage_per_life",
-                "headshot_rate", "fast_2k", "fast_3k", "fast_4k_plus",
-                "best_streak", "grenade_kills", "grenade_damage",
-                "grenade_damage_taken", "score", "points_per_minute")}
+            | {k: _num(p.get(k)) for k in PLAYER_FIELDS}
             for p in report.get("players") or []
         ],
         "weapons": [
@@ -377,20 +369,149 @@ def sanitize_report(report: dict) -> dict:
         "lane_analytics": _positional_block(se, names_by_id),
         "spatial": _spatial_block(report),
         "in_game_result": _in_game_result_block(report),
+        "key_moments": _key_moments_block(se, names_by_id),
+        "progression": _progression_block(se, names_by_id),
         "player_halves": _player_halves_block(report),
         "kill_streaks": _kill_streaks_block(report),
         "weapon_sides": _weapon_sides_block(report),
         "duels_by_side": _duels_by_side_block(report),
         "player_classes": _player_classes_block(report),
     }
+    dto["box_score_scale"] = _box_score_scale(dto["players"])
     assert_sanitized(dto)
     return dto
+
+
+PLAYER_FIELDS = (
+    "kills", "deaths", "assists", "headshots", "team_kills",
+    "suicides", "damage_dealt", "damage_taken",
+    "damage_differential", "capture_credits", "cap_breaks",
+    "shots", "hits", "raw_accuracy", "kd_ratio",
+    "damage_per_minute", "kills_per_minute", "damage_per_life",
+    "headshot_rate", "fast_2k", "fast_3k", "fast_4k_plus",
+    "best_streak", "grenade_kills", "grenade_damage",
+    "grenade_damage_taken", "score", "points_per_minute",
+)
+
+# Fields where a small number is the good one. A fill bar still scales on the
+# match max (the bar is "how much", not "how good"), but the match-best star
+# goes to the minimum, and a consumer that renders a full bar as an
+# achievement here has it backwards -- hence the flag travels in the DTO.
+LOWER_IS_BETTER = frozenset({
+    "deaths", "damage_taken", "team_kills", "suicides", "grenade_damage_taken",
+})
+
+
+def _box_score_scale(players: list[dict]) -> dict:
+    """Fill-bar normalisation for players[], computed once here.
+
+    Operator ruling 2026-09-16: the denominator is the max across ALL players
+    in the match, not within the player's own team (Leetify's choice). Per
+    field: `max_in_match` (the bar's denominator, so a bar is reproducible
+    and auditable), `higher_is_better`, and `best` -- the names holding the
+    match-best value (ties keep every name; min when lower is better). A
+    consumer's `is_match_best` is "name in best". Fields with no numeric
+    value in the match carry `max_in_match: null` and an empty `best`.
+    """
+    fields = {}
+    for field in PLAYER_FIELDS:
+        values = [(p["name"], p.get(field)) for p in players
+                  if isinstance(p.get(field), (int, float))]
+        if not values:
+            fields[field] = {"max_in_match": None,
+                             "higher_is_better": field not in LOWER_IS_BETTER,
+                             "best": []}
+            continue
+        maximum = max(v for _, v in values)
+        target = min(v for _, v in values) if field in LOWER_IS_BETTER else maximum
+        fields[field] = {
+            "max_in_match": maximum,
+            "higher_is_better": field not in LOWER_IS_BETTER,
+            "best": [name for name, v in values if v == target],
+        }
+    return {"scope": "all_players", "fields": fields}
+
+
+def _progression_block(se: dict, names_by_id: dict) -> dict:
+    """Public form of shadow_explorations.progression: cumulative series per
+    player per half (kills, deaths, damage) and per team (flag differential),
+    as [game_time, cumulative] points. Names only; ids never cross."""
+    pr = se.get("progression") or {}
+    return {
+        "status": pr.get("status") or "unavailable",
+        "definition": pr.get("definition"),
+        "definition_version": pr.get("definition_version"),
+        "parameters": dict(pr.get("parameters") or {}),
+        "metrics": list(pr.get("metrics") or []),
+        "team_metrics": list(pr.get("team_metrics") or []),
+        "available": dict(pr.get("available") or {}),
+        "coverage": {k: _num(v) for k, v in (pr.get("coverage") or {}).items()},
+        "caveats": list(pr.get("caveats") or []),
+        "players": [
+            {"name": names_by_id.get(row.get("player_id")),
+             "team": _num(row.get("team")),
+             "half": _num(row.get("half")),
+             "metric": row.get("metric"),
+             "points": [[_num(t), _num(v)] for t, v in row.get("points") or []]}
+            for row in pr.get("players") or []
+        ],
+        "teams": [
+            {"team": _num(row.get("team")),
+             "half": _num(row.get("half")),
+             "metric": row.get("metric"),
+             "points": [[_num(t), _num(v)] for t, v in row.get("points") or []]}
+            for row in pr.get("teams") or []
+        ],
+    }
 
 
 IN_GAME_RESULT_HALF_FIELDS = (
     "half", "team1_points", "team2_points", "team1_cumulative",
     "team2_cumulative", "team1_side", "team2_side",
 )
+
+
+def _key_moments_block(se: dict, names_by_id: dict) -> dict:
+    """Public form of shadow_explorations.highlight_windows.
+
+    A coarse, derived list -- at most top_n windows, each a game-time span, a
+    one-line summary, and the few players involved by name. It is not the event
+    stream: the per-event ``timeline`` stays private, and this block carries no
+    ids, positions, or per-kill detail. Consumers (key-moments section, HLTV
+    deep links, post-match message) read this rather than re-ranking.
+    """
+    hw = se.get("highlight_windows") or {}
+    return {
+        "status": hw.get("status") or "unavailable",
+        "definition": hw.get("definition"),
+        "definition_version": hw.get("definition_version"),
+        "parameters": dict(hw.get("parameters") or {}),
+        "windows_total": _num(hw.get("windows_total")),
+        "windows": [
+            {
+                "rank": w.get("rank"),
+                "half": w.get("half"),
+                "start": _num(w.get("start")),
+                "end": _num(w.get("end")),
+                "duration": _num(w.get("duration")),
+                "peak_at": _num(w.get("peak_at")),
+                "kinds": list(w.get("kinds") or []),
+                "events": _num(w.get("events")),
+                "swing": _num(w.get("swing")),
+                "peak_delta": _num(w.get("peak_delta")),
+                "score": _num(w.get("score")),
+                "summary": w.get("summary"),
+                "involved": [
+                    {"name": _name(p.get("player_name_at_match"))
+                     or names_by_id.get(p.get("player_id")),
+                     "team": p.get("team"),
+                     "involvement": _num(p.get("involvement"))}
+                    for p in w.get("involved") or []
+                ],
+            }
+            for w in hw.get("windows") or []
+        ],
+    }
 
 
 def _in_game_result_block(report: dict) -> dict:

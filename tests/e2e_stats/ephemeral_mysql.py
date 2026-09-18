@@ -190,6 +190,10 @@ class EphemeralMysql:
             "--bind-address=127.0.0.1",
             "--skip-name-resolve",
             "--skip-grant-tables",
+            # Pin the session zone. UNIX_TIMESTAMP(DATETIME) resolves through
+            # time_zone=SYSTEM, so on a non-UTC developer box every epoch the
+            # canary tests assert drifts by the local offset. CI is UTC; match it.
+            "--default-time-zone=+00:00",
         ]
         # mysqld/mariadbd refuse to start as uid 0 unless told to. Containers
         # run as root by default, so without this the whole Lane B image path

@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789328375-NY2_h2-2609131601-dod_thunder2.dem",
+"players": [
+{
+"deaths": 26,
+"id": "STEAM_0:1:2169339",
+"kills": 31,
+"lifespan": {
+"avg": "35s 27ms 363us 529ns",
+"max": "1m 4s 918ms 945us 313ns",
+"min": "11s 387ms 84us 961ns"
+},
+"name": "GL - mata b58",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:1:22192243",
+"kills": 10,
+"lifespan": {
+"avg": "34s 600ms 873us 594ns",
+"max": "1m 47s 828ms 979us 493ns",
+"min": "9s 403ms 808us 594ns"
+},
+"name": "GL - khorga. new mouse",
+"score": 5,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:13712426",
+"kills": 31,
+"lifespan": {
+"avg": "38s 333ms 145us 141ns",
+"max": "1m 11s 313ms 995us 361ns",
+"min": "13s 22ms 949us 219ns"
+},
+"name": "GL - Fincher",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:0:1155098",
+"kills": 23,
+"lifespan": {
+"avg": "43s 728ms 52us 553ns",
+"max": "2m 13s 113ms 6us 592ns",
+"min": "11s 387ms 84us 961ns"
+},
+"name": "GL - Manner",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:1:14384065",
+"kills": 26,
+"lifespan": {
+"avg": "57s 972ms 572us 326ns",
+"max": "3m 9s 52ms 993us 774ns",
+"min": "16s 281ms 5us 859ns"
+},
+"name": "GL - RaiveN",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:6137746",
+"kills": 20,
+"lifespan": {
+"avg": "37s 124ms 498us 220ns",
+"max": "1m 30s 422ms 988us 892ns",
+"min": "11s 321ms 960us 449ns"
+},
+"name": "GL - Su``:))))))))))))",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:10054114",
+"kills": 27,
+"lifespan": {
+"avg": "37s 902ms 208us 768ns",
+"max": "1m 8s 967ms 41us 15ns",
+"min": "10s 970ms 92us 773ns"
+},
+"name": "SILVERBACK 3SidedQuarter",
+"score": 9,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:0:531977444",
+"kills": 13,
+"lifespan": {
+"avg": "35s 552ms 138us 152ns",
+"max": "1m 38s 522ms 949us 219ns",
+"min": "12s 950ms 988us 770ns"
+},
+"name": "SILVERBACK shmaltz",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:9258540",
+"kills": 13,
+"lifespan": {
+"avg": "40s 416ms 628us 418ns",
+"max": "2m 24s 484ms 8us 789ns",
+"min": "9s 362ms 60us 547ns"
+},
+"name": "SILVERBACK Bojanglers",
+"score": 4,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:1:77934219",
+"kills": 32,
+"lifespan": {
+"avg": "36s 413ms 311us 993ns",
+"max": "1m 42s 671ms 997us 70ns",
+"min": "6s 92ms 987us 61ns"
+},
+"name": "SILVERBACK pb_",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 25,
+"id": "STEAM_0:0:47198332",
+"kills": 30,
+"lifespan": {
+"avg": "38s 303ms 705us 68ns",
+"max": "2m 11s 715ms 87us 890ns",
+"min": "10s 927ms 1us 953ns"
+},
+"name": "SILVERBACK faradayvzla;",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 18,
+"id": "STEAM_0:1:11268691",
+"kills": 23,
+"lifespan": {
+"avg": "55s 654ms 777us 928ns",
+"max": "2m 44s 285ms 766us 602ns",
+"min": "15s 469ms 970us 704ns"
+},
+"name": "SILVERBACK drink-",
+"score": 2,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 108,
+"axis": 144
+}
+}

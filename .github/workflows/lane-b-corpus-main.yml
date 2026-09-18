@@ -52,12 +52,31 @@
 # reason no PR had caused and no PR could fix. `infrastructure_ref` is the
 # merged SHA rather than the branch name so a later merge cannot move what this
 # run reports on.
+#
+# ## Why it also runs on pull requests that touch the suite's inputs
+#
+# 2026-09-17/18: `main` sat red for twelve merges on one `tests/e2e_stats/`
+# case (#445 loosened a migration guard its own test forbids; fixed in #456).
+# Nothing on a PR ran the suite, so every author saw a green page. The
+# `pull_request` trigger below runs the same `corpus` lane against the PR
+# head, only when a file the suite actually exercises changes. `paths:` is
+# fine here precisely because this is NOT a required check (the gotcha in
+# config-tests.yml does not apply): a skipped run reports nothing, a red run
+# is visible on the PR before merge. Refs follow the PR's base branch so the
+# harness and daemon stay one lineage.
 
 name: Lane B Corpus (main)
 
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - 'sql/**'
+      - 'scripts/**'
+      - 'tests/e2e_stats/**'
+      - 'build/lane-b/**'
+      - '.github/workflows/lane-b-*.yml'
   workflow_dispatch:
 
 permissions:
@@ -69,7 +88,8 @@ concurrency:
   # rather than queued: any red it would have reported is contained in the
   # commit that superseded it, so nothing is lost and merges never pile up
   # behind a 60-minute job.
-  group: lane-b-corpus-main
+  # Per ref: a PR run must never cancel the verdict on `main`, or vice versa.
+  group: lane-b-corpus-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -77,8 +97,10 @@ jobs:
     uses: ./.github/workflows/lane-b-stats-e2e.yml
     with:
       lane: corpus
-      infrastructure_ref: ${{ github.sha }}
-      amxx_ref: main
-      daemon_ref: main
-      matchhandler_ref: main
+      # PR: the head SHA (github.sha is the throwaway merge commit). Push: the
+      # merged SHA. Sibling refs track the PR's base so lineage stays uniform.
+      infrastructure_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      amxx_ref: ${{ github.base_ref || 'main' }}
+      daemon_ref: ${{ github.base_ref || 'main' }}
+      matchhandler_ref: ${{ github.base_ref || 'main' }}
     secrets: inherit

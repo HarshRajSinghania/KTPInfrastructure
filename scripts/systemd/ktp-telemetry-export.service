@@ -1,0 +1,17 @@
+[Unit]
+Description=Push the daily fleet performance rollup to the site
+Documentation=https://github.com/afraznein/KTPInfrastructure
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ktp-telemetry-export.py
+# Exits non-zero on an HTTP or transport failure AND on an empty window, which
+# fails the unit, which fires the OnFailure drop-in. The empty case is
+# deliberate: it is how a dead ktp-perf-rollup reaches a human, since this
+# script is the only thing that reads its output on a schedule.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

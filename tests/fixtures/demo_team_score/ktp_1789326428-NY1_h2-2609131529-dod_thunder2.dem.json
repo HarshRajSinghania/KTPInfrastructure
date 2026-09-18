@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789326428-NY1_h2-2609131529-dod_thunder2.dem",
+"players": [
+{
+"deaths": 26,
+"id": "STEAM_0:1:96487569",
+"kills": 17,
+"lifespan": {
+"avg": "36s 299ms 851us 637ns",
+"max": "1m 53s 914ms 1us 465ns",
+"min": "12s 229ms 980us 469ns"
+},
+"name": "RenameD*| rolly``",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:10045977",
+"kills": 28,
+"lifespan": {
+"avg": "49s 975ms 103us 469ns",
+"max": "2m 27s 307ms 6us 836ns",
+"min": "9s 557ms 6us 836ns"
+},
+"name": "RenameD*| Ho0liii",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:0:5931694",
+"kills": 19,
+"lifespan": {
+"avg": "32s 234ms 858us 449ns",
+"max": "2m 48s 729ms 980us 469ns",
+"min": "9s 881ms 713us 867ns"
+},
+"name": "RenameD*| Adam!!",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 35,
+"id": "STEAM_0:1:14524361",
+"kills": 20,
+"lifespan": {
+"avg": "24s 915ms 928us 310ns",
+"max": "1m 9s 768ms 997us 192ns",
+"min": "7s 299ms 11us 231ns"
+},
+"name": "RenameD*| asa",
+"score": 1,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:15083886",
+"kills": 19,
+"lifespan": {
+"avg": "42s 84ms 97us 226ns",
+"max": "2m 18s 567ms 993us 164ns",
+"min": "8s 931ms 7us 385ns"
+},
+"name": "RenameD*| Sq =)))))",
+"score": 1,
+"team": "allies"
+},
+{
+"deaths": 37,
+"id": "STEAM_0:1:7012713",
+"kills": 21,
+"lifespan": {
+"avg": "23s 752ms 251us 876ns",
+"max": "50s 875ms 976us 562ns",
+"min": "8s 585ms 510us 254ns"
+},
+"name": "RenameD*| crick[jd]",
+"score": 0,
+"team": "allies"
+},
+{
+"deaths": 15,
+"id": "STEAM_0:1:74027",
+"kills": 29,
+"lifespan": {
+"avg": "1m 2s 931ms 21us 297ns",
+"max": "3m 25s 187ms 988us 281ns",
+"min": "16s 173ms 4us 150ns"
+},
+"name": "gskiLL  FraGGoN[dd]<3vt",
+"score": 6,
+"team": "axis"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:0:1642552",
+"kills": 18,
+"lifespan": {
+"avg": "35s 58ms 506us 829ns",
+"max": "1m 39s 57ms 991us 27ns",
+"min": "11s 942ms 993us 165ns"
+},
+"name": "gskiLL  renwomaet",
+"score": 6,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:78865",
+"kills": 24,
+"lifespan": {
+"avg": "39s 432ms 346us 496ns",
+"max": "1m 51s 474ms 975us 586ns",
+"min": "21s 132ms 19us 43ns"
+},
+"name": "gskiLL  rolyat",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:1:506271",
+"kills": 34,
+"lifespan": {
+"avg": "57s 500ms 787us 523ns",
+"max": "1m 55s 835ms 372us 925ns",
+"min": "17s 289ms 1us 465ns"
+},
+"name": "gskiLL  charlie",
+"score": 3,
+"team": "axis"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:3612473",
+"kills": 30,
+"lifespan": {
+"avg": "49s 639ms 518us 11ns",
+"max": "1m 44s 689ms 865us 113ns",
+"min": "13s 491ms 943us 359ns"
+},
+"name": "gskiLL  dod",
+"score": 1,
+"team": "axis"
+},
+{
+"deaths": 22,
+"id": "STEAM_0:1:64565",
+"kills": 35,
+"lifespan": {
+"avg": "44s 429ms 854us 683ns",
+"max": "1m 31s 659ms 774us 781ns",
+"min": "18s 259ms 765us 625ns"
+},
+"name": "gskiLL  G A U L",
+"score": 0,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 25,
+"axis": 273
+}
+}

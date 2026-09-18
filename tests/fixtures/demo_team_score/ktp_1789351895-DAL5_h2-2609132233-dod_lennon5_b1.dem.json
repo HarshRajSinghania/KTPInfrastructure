@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789351895-DAL5_h2-2609132233-dod_lennon5_b1.dem",
+"players": [
+{
+"deaths": 34,
+"id": "STEAM_0:1:454573929",
+"kills": 32,
+"lifespan": {
+"avg": "26s 4ms 496us 524ns",
+"max": "1m 5s 901ms 855us 469ns",
+"min": "2s 825ms 988us 770ns"
+},
+"name": "[$] allennnnnn",
+"score": 21,
+"team": "allies"
+},
+{
+"deaths": 30,
+"id": "STEAM_0:0:3906550",
+"kills": 30,
+"lifespan": {
+"avg": "28s 650ms 240us 871ns",
+"max": "1m 20s 217ms 41us 15ns",
+"min": "1s 718ms 994us 141ns"
+},
+"name": "[$] sTarK x_0",
+"score": 14,
+"team": "allies"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:0:1794",
+"kills": 22,
+"lifespan": {
+"avg": "28s 261ms 224us 185ns",
+"max": "1m 6s 332ms 31us 250ns",
+"min": "5s 633ms 514us 405ns"
+},
+"name": "[$] calebsod",
+"score": 12,
+"team": "allies"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:0:24858784",
+"kills": 28,
+"lifespan": {
+"avg": "36s 943ms 573us 815ns",
+"max": "1m 23s 446ms 899us 414ns",
+"min": "4s 265ms 991us 211ns"
+},
+"name": "[$] nacho-",
+"score": 10,
+"team": "allies"
+},
+{
+"deaths": 29,
+"id": "STEAM_0:0:3656742",
+"kills": 21,
+"lifespan": {
+"avg": "31s 766ms 512us 90ns",
+"max": "1m 21s 162ms 994us 385ns",
+"min": "1s 89ms 172us 364ns"
+},
+"name": "[$] nomistizzle.iwa <8{~",
+"score": 10,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:99398",
+"kills": 23,
+"lifespan": {
+"avg": "38s 913ms 118us 998ns",
+"max": "3m 11s 888ms 793us 945ns",
+"min": "2s 295ms 13us 428ns"
+},
+"name": "[$] Carpal Tunnel Cory",
+"score": 9,
+"team": "allies"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:1:67913",
+"kills": 38,
+"lifespan": {
+"avg": "36s 893ms 578us 627ns",
+"max": "2m 48s 90ms 972us 901ns",
+"min": "6s 57ms 6us 836ns"
+},
+"name": "ngo , yayme <8{~",
+"score": 16,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:0:3673082",
+"kills": 26,
+"lifespan": {
+"avg": "36s 765ms 871us 401ns",
+"max": "1m 24s 371ms 2us 197ns",
+"min": "5s 12ms 84us 961ns"
+},
+"name": "ngo , bluerevolver",
+"score": 14,
+"team": "axis"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:1:9833731",
+"kills": 33,
+"lifespan": {
+"avg": "29s 732ms 498us 400ns",
+"max": "1m 21s 985ms 961us 914ns",
+"min": "6s 759ms 33us 203ns"
+},
+"name": "ngo , bausch",
+"score": 11,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:1:123285",
+"kills": 21,
+"lifespan": {
+"avg": "35s 781ms 146us 14ns",
+"max": "1m 24s 805ms 236us 816ns",
+"min": "6s 874ms 53us 955ns"
+},
+"name": "ngo , khoi",
+"score": 9,
+"team": "axis"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:0:103022502",
+"kills": 32,
+"lifespan": {
+"avg": "1m 27ms 682us 833ns",
+"max": "2m 44s 447ms 937us 11ns",
+"min": "15s 50ms 18us 311ns"
+},
+"name": "ngo , kush",
+"score": 7,
+"team": "axis"
+},
+{
+"deaths": 31,
+"id": "STEAM_0:0:14782058",
+"kills": 20,
+"lifespan": {
+"avg": "30s 645ms 658us 782ns",
+"max": "1m 35s 531ms 494us 140ns",
+"min": "5s 22ms 33us 691ns"
+},
+"name": "ngo , anthony",
+"score": 5,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 375,
+"axis": 321
+}
+}

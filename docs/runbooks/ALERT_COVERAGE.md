@@ -84,31 +84,34 @@ that never "failed", and alerts on state transitions only.
 | `ktp-reports.service` | yes, once the unit from `systemd/` is reinstalled; the live unit has none | no | a failing run alerts; `ktp-reports.timer` is not in `CRITICAL_TIMERS`, so a timer that stops firing does not. The journal only says `exit-code`; the cause is in `/var/log/ktp-report-service.log` |
 | `ktp-admin-bot.service` | **no** | **no** | **no — hole** |
 | `ktp-frag-diag-tail.service` | **no** | **no** | **no — hole** |
+| any other unit systemd calls `failed` | — | via `failed-unit:<name>` | yes — `systemctl --failed` is a producer for the health check since 2026-09-16 |
 
 Both uncovered units are long-lived daemons currently `active (running)`. If
-either exits, nothing on this box says so.
+either exits *cleanly* nothing says so; if either exits into `failed`, the
+`failed-unit:` producer now reports it once, by transition.
 
 ## Data server — timers and scheduled work
 
-`CRITICAL_TIMERS` covers three timers. The data server runs ten.
+`CRITICAL_TIMERS` covers ten timers as of 2026-09-16; before that, three of ten.
 
 | Timer | In `CRITICAL_TIMERS` | If it silently stops |
 |---|---|---|
 | `hltv-restart.timer` | yes | alerted |
 | `ktp-render-banlist.timer` | yes | alerted, on three independent legs |
 | `ktp-demo-publish.timer` | yes | alerted |
-| `ktp-hltv-liveness.timer` | **no** | **the HLTV liveness check stops and nothing notices** |
-| `ktp-hlstatsx-ingest-monitor.timer` | **no** | ingest monitoring stops silently |
-| `ktp-stats-export.timer` | **no** | exports stop; last file stays in place and reads healthy |
-| `ktp-corpus-push.timer` / `-denver` | **no** | corpus pushes stop silently |
-| `ktp-roster-history-audit.timer` | **no** | audit stops silently |
-| `ktp-identity-reconcile.timer` | **no** | the *service* has `OnFailure=`, so a failing run alerts; a timer that stops firing does not |
+| `ktp-hltv-liveness.timer` | yes (2026-09-16) | **the HLTV liveness check stops and nothing notices** |
+| `ktp-hlstatsx-ingest-monitor.timer` | yes (2026-09-16) | ingest monitoring stops silently |
+| `ktp-stats-export.timer` | yes (2026-09-16) | exports stop; last file stays in place and reads healthy |
+| `ktp-corpus-push.timer` / `-denver` | yes (2026-09-16) | corpus pushes stop silently |
+| `ktp-roster-history-audit.timer` | yes (2026-09-16) | audit stops silently |
+| `ktp-identity-reconcile.timer` | yes (2026-09-16) | the *service* has `OnFailure=`, so a failing run alerts; a timer that stops firing does not |
 | `ktp-monday-reminder.timer` | **no** | reminder stops; human-visible |
 
 The distinction that matters: `OnFailure=` fires when a unit **runs and fails**.
 Nothing fires when a unit **stops running at all**. Five of the incidents in the
-table at the top are that exact shape, which is why `CRITICAL_TIMERS` exists —
-it is just three entries wide against ten timers.
+table at the top are that exact shape, which is why `CRITICAL_TIMERS` exists.
+Only `ktp-monday-reminder.timer` is deliberately left out: a reminder that fails
+to arrive is noticed by the people expecting it.
 
 Cron-scheduled work is outside both mechanisms entirely:
 
@@ -131,6 +134,7 @@ Cron-scheduled work is outside both mechanisms entirely:
 | HLStatsX ingest stalls | yes | yes | `hlstatsx-ingest-monitor.py` |
 | Tier 2 suite goes quiet | yes | yes | `ktp-tier2-heartbeat.sh` |
 | Perf spike signatures | yes | yes | `ktp-profile-aggregator` → MySQL → Discord, `posted_alert` dedup |
+| Stats daemon rejecting the fleet's capture events | yes | yes | `ktp-data-server-health.sh`, `capture-loss:<event_type>` — trailing 24h per event type from `ktp_capture_health`, warn 5% / clear 2%, floor 200 received. Added after the 09-02→09-08 loss went six days unnoticed |
 
 ---
 
@@ -143,9 +147,8 @@ Ranked by what they would cost during Season 10.
    same for the hosts that write demos and logs during a match. The May 2026
    disk-full event is the shape of the cost. *(Repo-derived; a game host may
    carry a local crontab this repo does not track — see Unverified.)*
-2. **`CRITICAL_TIMERS` is three entries against ten timers.** Most relevant:
-   `ktp-hltv-liveness.timer` is unwatched, so the check built after the 9h48m
-   HLTV outage can itself stop without anyone hearing about it.
+2. ~~**`CRITICAL_TIMERS` is three entries against ten timers.**~~ Closed
+   2026-09-16: all ten live timers bar the Monday reminder are listed.
 3. **`ktp-admin-bot` and `ktp-frag-diag-tail` have no detection path at all** —
    no `OnFailure=`, not in `CRITICAL_SERVICES`.
 4. **Nothing watches the hourly health check or the weekly fleet audit.** Both

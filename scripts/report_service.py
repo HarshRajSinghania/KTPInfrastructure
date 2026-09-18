@@ -665,6 +665,63 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_mmr(args: argparse.Namespace) -> int:
+    """Insert a prebuilt mmr_openskill payload as a season-aggregate revision.
+
+    The MMR ladder runs in CI, which holds only the website's public read key
+    -- it cannot write here, and should not: giving a hosted runner a
+    production write credential to publish a weekly number is a much larger
+    step than the feature warrants. So CI produces the payload file
+    (scripts/mmr/mmr_openskill_payload.json, published on the `mmr-ratings`
+    branch) and this inserts it, on the box that already owns the credential.
+
+    Deliberately dumb: it does not recompute ratings, it does not reach the
+    network, and it refuses anything that is not already the right shape.
+    Same revision/sha convention as cmd_aggregate, so an unchanged payload is
+    a no-op rather than a new revision every week.
+    """
+    sys.path.insert(0, str(Path(args.repo) / "scripts" / "mmr"))
+    import mmr_payload as MMRP
+
+    payload = json.loads(Path(args.payload).read_text(encoding="utf-8"))
+    problems = MMRP.validate_for_import(payload)
+    if problems:
+        for problem in problems:
+            print(f"refusing: {problem}")
+        return 1
+    players = payload["players"]
+    # validate_for_import has already asserted payload["kind"] == AGGREGATE_KIND.
+    kind = MMRP.AGGREGATE_KIND
+
+    db = LocalMysql()
+    body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    out = db.sql(
+        "SELECT payload_sha256, COALESCE(MAX(revision),0) "
+        f"FROM ktp_web_season_aggregates WHERE kind = {sql_str(kind)} "
+        "GROUP BY payload_sha256 ORDER BY MAX(id) DESC LIMIT 1"
+    )
+    lines = out.strip().splitlines()
+    last_sha, last_rev = (lines[-1].split("	") if len(lines) > 1 else ("", "0"))
+    if last_sha == sha:
+        print(f"  {kind}: unchanged (revision {last_rev})")
+        return 0
+    from datetime import datetime, timezone
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    db.sql(
+        "INSERT INTO ktp_web_season_aggregates (kind, revision, "
+        "generated_at, source_report_count, report_schema_version, "
+        "payload_sha256, payload) "
+        f"VALUES ({sql_str(kind)}, {int(last_rev) + 1}, "
+        f"{sql_str(generated_at)}, {int(payload.get('source_report_count', 0))}, "
+        f"{int(payload.get('report_schema_version', 9))}, {sql_str(sha)}, "
+        f"{sql_str(body)})"
+    )
+    print(f"  {kind}: wrote revision {int(last_rev) + 1} ({len(players)} players). "
+          f"report_sync will publish it on its next run.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo", type=Path, required=True,
@@ -685,8 +742,16 @@ def main(argv: list[str] | None = None) -> int:
     # its floor pools pre-season test reports into the published season.
     agg.add_argument("--since", type=since_arg, required=True,
                      help="only pool reports whose match start_time >= this")
+    imp = sub.add_parser("import-mmr",
+                         help="insert a prebuilt mmr_openskill payload built by CI")
+    imp.add_argument("payload", type=Path,
+                     help="path to mmr_openskill_payload.json")
     args = ap.parse_args(argv)
-    return cmd_generate(args) if args.cmd == "generate" else cmd_aggregate(args)
+    if args.cmd == "generate":
+        return cmd_generate(args)
+    if args.cmd == "import-mmr":
+        return cmd_import_mmr(args)
+    return cmd_aggregate(args)
 
 
 if __name__ == "__main__":

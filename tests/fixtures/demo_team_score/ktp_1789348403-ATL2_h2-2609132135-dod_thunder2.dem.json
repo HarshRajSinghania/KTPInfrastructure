@@ -1,0 +1,165 @@
+{
+"file": "ktp_1789348403-ATL2_h2-2609132135-dod_thunder2.dem",
+"players": [
+{
+"deaths": 22,
+"id": "STEAM_0:1:78863",
+"kills": 23,
+"lifespan": {
+"avg": "49s 26ms 667us 719ns",
+"max": "2m 9s 271ms 133us 422ns",
+"min": "14s 677ms 1us 954ns"
+},
+"name": "cope ~ ddorito",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:769711",
+"kills": 23,
+"lifespan": {
+"avg": "36s 292ms 521us 885ns",
+"max": "2m 21s 252ms 990us 722ns",
+"min": "4s 473ms 999us 24ns"
+},
+"name": "cope ~ [//_-] ilovealiceglass",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:1:1766773",
+"kills": 22,
+"lifespan": {
+"avg": "41s 488ms 317us 871ns",
+"max": "1m 51s 796ms 20us 508ns",
+"min": "6s 920ms 166us 16ns"
+},
+"name": "cope ~ toxinatoR!",
+"score": 6,
+"team": "allies"
+},
+{
+"deaths": 21,
+"id": "STEAM_0:0:1699528",
+"kills": 21,
+"lifespan": {
+"avg": "42s 390ms 705us 566ns",
+"max": "1m 54s 19ms 42us 968ns",
+"min": "5s 381ms 958us 7ns"
+},
+"name": "cope ~ jules",
+"score": 4,
+"team": "allies"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:741614372",
+"kills": 25,
+"lifespan": {
+"avg": "41s 710ms 41us 46ns",
+"max": "1m 47s 403ms 76us 172ns",
+"min": "7s 243ms 896us 484ns"
+},
+"name": "cope ~ ryan",
+"score": 3,
+"team": "allies"
+},
+{
+"deaths": 17,
+"id": "STEAM_0:1:8702451",
+"kills": 28,
+"lifespan": {
+"avg": "58s 612ms 399us 631ns",
+"max": "2m 59s 659ms 57us 617ns",
+"min": "16s 315ms 2us 442ns"
+},
+"name": "cope ~ ian",
+"score": 2,
+"team": "allies"
+},
+{
+"deaths": 20,
+"id": "STEAM_0:1:440093743",
+"kills": 26,
+"lifespan": {
+"avg": "51s 262ms 79us 412ns",
+"max": "1m 40s 428ms 985us 596ns",
+"min": "14s 589ms 19us 776ns"
+},
+"name": "o8-[_Leoo! <3 Messi_]",
+"score": 9,
+"team": "axis"
+},
+{
+"deaths": 23,
+"id": "STEAM_0:0:151174768",
+"kills": 27,
+"lifespan": {
+"avg": "45s 4ms 11us 840ns",
+"max": "2m 16s 507ms 125us 854ns",
+"min": "13s 554ms 16us 113ns"
+},
+"name": "o8-[_TillJim_]",
+"score": 7,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:1:139114027",
+"kills": 27,
+"lifespan": {
+"avg": "46s 582ms 392us 374ns",
+"max": "4m 23s 559ms 600us 830ns",
+"min": "13s 371ms 948us 242ns"
+},
+"name": "o8-[_BARONN_]",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 26,
+"id": "STEAM_0:0:14081672",
+"kills": 18,
+"lifespan": {
+"avg": "37s 716ms 598us 247ns",
+"max": "1m 36s 133ms 972us 168ns",
+"min": "11s 502ms 14us 160ns"
+},
+"name": "o8-[_chicholson_]",
+"score": 5,
+"team": "axis"
+},
+{
+"deaths": 24,
+"id": "STEAM_0:0:443810",
+"kills": 22,
+"lifespan": {
+"avg": "41s 795ms 918us 391ns",
+"max": "1m 50s 212ms 36us 133ns",
+"min": "9s 989ms 990us 235ns"
+},
+"name": "o8-[_kroD-_]",
+"score": 1,
+"team": "axis"
+},
+{
+"deaths": 27,
+"id": "STEAM_0:1:3620667",
+"kills": 10,
+"lifespan": {
+"avg": "33s 608ms 924us 865ns",
+"max": "1m 28s 181ms 30us 273ns",
+"min": "8s 298ms 34us 668ns"
+},
+"name": "o8-[_ProstaR!_]",
+"score": 0,
+"team": "axis"
+}
+],
+"teams": {
+"allies": 138,
+"axis": 62
+}
+}
