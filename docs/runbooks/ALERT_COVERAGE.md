@@ -117,7 +117,7 @@ Cron-scheduled work is outside both mechanisms entirely:
 
 | Job | Watched by |
 |---|---|
-| `ktp-data-server-health` (hourly) | **nothing — this is the watcher** |
+| `ktp-data-server-health` (hourly) | **the next run of itself**, via the run ledger (2026-09-17): an aborted or missed run becomes `health-check-aborted` / `health-check-missed-runs` in the following completed run's report. A check that stops for good still says nothing — that is `KTPAdminBot`#21's stale-state field, merged and not deployed |
 | `ktp-fleet-audit` (Monday 05:00 ET) | **nothing**; it does refuse to run against a non-git `/opt/ktp-infra` |
 | `ktp-tier2-heartbeat` | itself; deliberately a data-server cron so it does not share fate with the GH runner it watches |
 | `ktp-backup-watchdog` | itself; exists because a run that never happens produces no output |
@@ -151,8 +151,16 @@ Ranked by what they would cost during Season 10.
    2026-09-16: all ten live timers bar the Monday reminder are listed.
 3. **`ktp-admin-bot` and `ktp-frag-diag-tail` have no detection path at all** —
    no `OnFailure=`, not in `CRITICAL_SERVICES`.
-4. **Nothing watches the hourly health check or the weekly fleet audit.** Both
-   are the watchers, and a watcher that stops looks exactly like a quiet estate.
+4. **Narrowed 2026-09-17, not closed: the hourly health check now reports its own
+   last run; the weekly fleet audit still reports nothing.** Both are watchers,
+   and a watcher that stops looks exactly like a quiet estate — which is why the
+   2026-08-31 abort ran for fifteen days before anyone asked why the channel had
+   gone calm. `ktp-data-server-health.sh` keeps a run ledger, and the next
+   completed run raises `health-check-aborted` (naming the line it died on) or
+   `health-check-missed-runs`. **A run that dies still cannot speak for itself** —
+   the following run speaks for it — so a check that stops for good is invisible
+   from the box. That needs the external detector in `afraznein/KTPAdminBot`#21,
+   merged and **not deployed**.
 5. **`ktp-restart-drift.py` runs on no schedule.** The drift it was written to
    find is real and, as of 2026-08-30, still open.
 

@@ -13,9 +13,10 @@
 # Log:        /var/log/ktp-data-server-health.log
 # Discord:    sources /etc/ktp/discord-relay.conf (RELAY_URL + AUTH_SECRET)
 
-set -euo pipefail
+# -E only so the ERR trap below is inherited into functions; nothing else changes.
+set -Eeuo pipefail
 
-STATE_FILE=/var/lib/ktp-data-server-health.json
+STATE_FILE="${STATE_FILE:-/var/lib/ktp-data-server-health.json}"
 # #ktp-crashes — consolidated with perf-rollup (PERF_ALERT_CHANNEL in
 # /etc/ktp/discord-relay.conf, same channel) per operator decision
 # 2026-05-06. Health alerts are crash-class signals (services dying);
@@ -105,6 +106,114 @@ BANLIST_STALE_SEC=900
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# >>> ktp-run-ledger — extracted verbatim by tests/unit/test_health_run_ledger.py
+# Nothing watches this check; it IS the watcher, and a watcher that stops looks
+# exactly like a quiet estate (ALERT_COVERAGE.md hole 4). From #207 on 2026-08-31
+# until #397 it exited before its own report on every one-sided transition — 15
+# days during which it could not have said a word, and nothing anywhere noticed.
+# #397 removed that particular abort. It did not make an abort visible, and the
+# next one will be a different line.
+#
+# So each run leaves a record of how it ended, and the next completed run reads
+# it. Plain key=value written with printf, never jq: the ledger has to survive
+# the failures that kill the rest of this script, an unusable jq included.
+RUN_LEDGER="${RUN_LEDGER:-/var/lib/ktp-data-server-health.run}"
+# Hourly cron, three intervals of slack. Two would fire on the ordinary gap a
+# single aborted run leaves behind, which health-check-aborted already reports
+# with the line number.
+RUN_GAP_SEC="${RUN_GAP_SEC:-10800}"
+
+# ledger_items <ledger-text> <now-epoch> <gap-sec>
+# Prints `key<TAB>detail` for what the PREVIOUS run's ledger says went wrong, and
+# nothing at all when it completed on time. At most one line: a run that died is
+# also a run that did not complete, and two items for one fault double-count it
+# in the set diff.
+ledger_items() {
+    local text=$1 now=$2 gap=$3
+    local k v status="" line="" completed=""
+    while IFS='=' read -r k v; do
+        case "$k" in
+            status) status=$v ;;
+            line) line=$v ;;
+            completed) completed=$v ;;
+        esac
+    done <<< "$text"
+    # No ledger at all is a first run, not a missed one. Alerting here would put
+    # one false failure on every fresh install, which is how a reader learns to
+    # skip the line.
+    if [ -z "$status" ] && [ -z "$completed" ]; then return 0; fi
+
+    local age=-1 silence=""
+    if [[ $completed =~ ^[0-9]+$ ]]; then
+        age=$(( now - completed ))
+        silence=", and the last completed run was $(( age / 3600 ))h ago"
+    fi
+    if [ "$status" != "ok" ]; then
+        # An ERR trap cannot name a line for a run that was signalled rather
+        # than errexit'd -- the OOM killer, a systemd stop. Saying "line 0"
+        # there would send the reader to the shebang.
+        local where="at line $line"
+        if [ -z "$line" ] || [ "$line" = "0" ]; then
+            where="at no line it could name, so it was signalled rather than failing a command"
+        fi
+        printf 'health-check-aborted\tthe previous run exited early %s (%s); it posted no alert and saved no state%s\n' \
+            "$where" "${status:-unknown}" "$silence"
+        return 0
+    fi
+    if [ "$age" -lt 0 ]; then
+        printf 'health-check-aborted\tthe run ledger carries no completion timestamp, so the previous run cannot be accounted for\n'
+        return 0
+    fi
+    if [ "$age" -gt "$gap" ]; then
+        printf 'health-check-missed-runs\tno run completed for %sh — this check is hourly, so nothing was watching for that long\n' \
+            "$(( age / 3600 ))"
+    fi
+}
+
+# write_ledger <exit-status> <errexit-line>
+# `completed` moves only on a clean exit. A died run carries the previous value
+# forward, so the silence keeps accumulating instead of resetting itself every
+# hour while the check is broken.
+write_ledger() {
+    local rc=$1 line=$2 status=died completed=${PREV_COMPLETED:-}
+    if [ "$rc" -eq 0 ]; then status=ok; line=0; completed=$(date +%s); fi
+    mkdir -p "$(dirname "$RUN_LEDGER")" 2>/dev/null || true
+    printf 'status=%s\nrc=%s\nline=%s\nstarted=%s\ncompleted=%s\n' \
+        "$status" "$rc" "$line" "${RUN_STARTED:-0}" "$completed" \
+        > "$RUN_LEDGER.tmp" 2>/dev/null \
+        && mv -f "$RUN_LEDGER.tmp" "$RUN_LEDGER" 2>/dev/null || true
+}
+# <<< ktp-run-ledger
+
+RUN_STARTED=$(date +%s)
+PREV_LEDGER=$(cat "$RUN_LEDGER" 2>/dev/null || true)
+PREV_COMPLETED=""
+while IFS='=' read -r _k _v; do
+    if [ "$_k" = "completed" ]; then PREV_COMPLETED=$_v; fi
+done <<< "$PREV_LEDGER"
+
+# Line of the command that tripped errexit, so the next run can name it rather
+# than only saying that something went wrong. `set -E` above carries this into
+# functions; without it an abort inside save_state would report line 0.
+_run_fail_line=0
+trap '_run_fail_line=$LINENO' ERR
+
+# One EXIT trap, installed before the first thing that can fail, so that every
+# way out is recorded: the clean `exit 0`, an errexit death, and a signal.
+PREV_LIST=""
+TMP_CURR=""
+on_exit() {
+    local rc=$?
+    # We are leaving either way; errexit here would only truncate the cleanup.
+    set +e
+    write_ledger "$rc" "$_run_fail_line"
+    if [ -n "$PREV_LIST" ]; then rm -f "$PREV_LIST"; fi
+    if [ -n "$TMP_CURR" ]; then rm -f "$TMP_CURR"; fi
+    rm -f /tmp/ktp-health-resp.txt
+    return "$rc"
+}
+trap on_exit EXIT
+
 # >>> ktp-alert-settle — extracted verbatim by tests/unit/test_health_transition_report.py
 # systemd reports `activating`/`deactivating`/`reloading` while a unit is mid-restart, and
 # an hourly cron sampling at :00 lands in the same minute as hltv-restart.timer (03:00 and
@@ -148,7 +257,6 @@ join_keys() {
 # Read before the checks run, not after, because the disk thresholds below latch
 # on it: an item already reported stays reported until it clears the lower bound.
 PREV_LIST=$(mktemp)
-trap 'rm -f "$PREV_LIST"' EXIT
 if [ -f "$STATE_FILE" ]; then
     jq -r '.down[]?' < "$STATE_FILE" 2>/dev/null | sort -u > "$PREV_LIST" || : > "$PREV_LIST"
 fi
@@ -159,6 +267,14 @@ down=()
 # a number inside a key makes every change of that number read to the set
 # comparison as one recovery plus one new failure.
 declare -A detail=()
+
+# The check's own last run, read first on purpose: if this script is the thing
+# that is broken, that is the most important line in the report and it must not
+# depend on a later probe surviving to be printed.
+while IFS=$'\t' read -r _key _note; do
+    if [ -z "${_key:-}" ]; then continue; fi
+    down+=("$_key"); detail[$_key]="$_note"
+done <<< "$(ledger_items "$PREV_LEDGER" "$(date +%s)" "$RUN_GAP_SEC")"
 
 for svc in "${CRITICAL_SERVICES[@]}"; do
     settled_state "$svc"; state=$SETTLED
@@ -475,7 +591,6 @@ fi
 # curr.list: sorted, deduplicated set of currently-down items
 # prev.list: read at the top of the run, because the disk checks latch on it
 TMP_CURR=$(mktemp) TMP_PREV="$PREV_LIST"
-trap 'rm -f "$TMP_CURR" "$TMP_PREV" /tmp/ktp-health-resp.txt' EXIT
 
 if [ ${#down[@]} -gt 0 ]; then
     printf '%s\n' "${down[@]}" | sort -u > "$TMP_CURR"
@@ -527,7 +642,11 @@ save_state() {
     else
         down_json='[]'
     fi
-    prev_json=$(jq -c . < "$STATE_FILE" 2>/dev/null || echo '{}')
+    # An EMPTY state file makes jq print nothing and exit 0, so the `||` never
+    # fires and `--argjson prev ""` below aborts the run. See the redirect at the
+    # end of this function for how the file came to be empty.
+    prev_json=$(jq -c . < "$STATE_FILE" 2>/dev/null || true)
+    [ -n "$prev_json" ] || prev_json='{}'
     detail_json='{}'
     # Guarded: "${!detail[@]}" on an empty associative array is an unbound
     # variable under `set -u` on bash < 4.4.
@@ -536,7 +655,13 @@ save_state() {
             detail_json=$(jq -c --arg k "$k" --arg v "${detail[$k]}" '. + {($k): $v}' <<< "$detail_json")
         done
     fi
-    health_state_document "$down_json" "$prev_json" "$detail_json" "$(ts)" > "$STATE_FILE"
+    # Via a temp file, because `> "$STATE_FILE"` truncates BEFORE jq runs: a jq
+    # that fails here left a zero-byte state file, which the read above then
+    # turned into an empty --argjson and an abort — on this run and on every run
+    # after it, until someone deleted the file by hand. A check that breaks
+    # itself permanently on its first bad hour is worse than no check.
+    health_state_document "$down_json" "$prev_json" "$detail_json" "$(ts)" > "$STATE_FILE.tmp"
+    mv -f "$STATE_FILE.tmp" "$STATE_FILE"
 }
 
 # ---- Alert on transitions only ----

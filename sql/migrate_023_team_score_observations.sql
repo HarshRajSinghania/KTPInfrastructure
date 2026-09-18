@@ -428,16 +428,26 @@ SET @m23_bad_checks := (SELECT COUNT(*) FROM (
  ) checks WHERE NOT (
   (CONSTRAINT_NAME='chk_team_score_terminal_half' AND clause='terminal_halfin1,2orterminal_half>=101') OR
   (CONSTRAINT_NAME='chk_team_score_lifecycle_complete' AND clause='lifecycle_complete=1') OR
-  (CONSTRAINT_NAME='chk_team_score_settlement' AND clause='settlement_seconds>=30') OR
+  -- LIKE, not =: migration 034 makes this producer-conditional, and the 30s floor
+  -- survives as a disjunct. A constraint this guard pins can never be evolved.
+  (CONSTRAINT_NAME='chk_team_score_settlement' AND clause LIKE '%settlement_seconds>=30%') OR
   (CONSTRAINT_NAME='chk_team_score_side_ids' AND clause='allies_team_idin1,2andaxis_team_idin1,2andallies_team_id<>axis_team_id') OR
   (CONSTRAINT_NAME='chk_team_score_half' AND clause='halfin1,2orhalf>=101') OR
   (CONSTRAINT_NAME='chk_team_score_source_version' AND clause='source_version=1') OR
   (CONSTRAINT_NAME='chk_team_score_conflict_hashes' AND clause='incumbent_raw_sha256<>rejected_raw_sha256') OR
   (CONSTRAINT_NAME='chk_team_score_audit_terminal_half' AND clause='terminal_halfin1,2orterminal_half>=101') OR
+  -- Producer constraints: exactly the clause set this lane's migrations produce --
+  -- 032's equality and 033's widening (measured via this normalisation, #445).
+  -- A migration that widens the producer set again adds its clause here; any
+  -- other shape is drift and must be rejected.
   (TABLE_NAME='ktp_team_score_observations' AND CONSTRAINT_NAME='chk_team_score_producer'
-   AND @m23_observation_producer=1 AND BINARY exact_clause=BINARY 'producer=''KTPHudObserver''') OR
+   AND @m23_observation_producer=1 AND BINARY exact_clause IN (
+     BINARY 'producer=''KTPHudObserver''',
+     BINARY 'producerin''KTPHudObserver'',''hltv-demo''')) OR
   (TABLE_NAME='ktp_team_score_ingest_manifests' AND CONSTRAINT_NAME='chk_team_score_manifest_producer'
-   AND @m23_manifest_producer=1 AND BINARY exact_clause=BINARY 'producer=''KTPHudObserver''')
+   AND @m23_manifest_producer=1 AND BINARY exact_clause IN (
+     BINARY 'producer=''KTPHudObserver''',
+     BINARY 'producerin''KTPHudObserver'',''hltv-demo'''))
  ));
 SET @m23_ok := (@m23_timestamp_defaults=4 AND @m23_fk_ok=1
  AND @m23_check_count=8+@m23_observation_producer+@m23_manifest_producer
