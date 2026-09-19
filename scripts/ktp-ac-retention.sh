@@ -37,7 +37,10 @@ DRY_RUN="${DRY_RUN:-0}"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 # ── 1. Upload day-dirs ────────────────────────────────────────────────
-if [ -d "$UPLOADS_DIR" ]; then
+# 0 or unset means RETAIN EVERYTHING. The guard has to be HERE, not only in the
+# default: "-0 days" resolves to TODAY, so a bare default of 0 would sweep the
+# entire archive rather than none of it.
+if [ -d "$UPLOADS_DIR" ] && [ "${UPLOAD_RETENTION_DAYS}" -gt 0 ]; then
     cutoff=$(date -d "-${UPLOAD_RETENTION_DAYS} days" '+%Y-%m-%d')
     swept=0
     for d in "$UPLOADS_DIR"/????-??-??; do
