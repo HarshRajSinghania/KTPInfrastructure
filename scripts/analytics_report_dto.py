@@ -30,7 +30,7 @@ from scripts.in_game_result import unavailable as in_game_unavailable
 from scripts.kill_streaks import DEFINITION as KILL_STREAK_DEFINITION
 from scripts.kill_streaks import DEFINITION_VERSION as KILL_STREAK_DEFINITION_VERSION
 
-CONTRACT_VERSION = "analytics-report-dto-v1.5.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
+CONTRACT_VERSION = "analytics-report-dto-v1.6.0"  # docs/ANALYTICS_REPORT_DTO_CONTRACT.md
 
 # hlstatsx DATETIMEs are naive league-local time: the data server runs
 # America/New_York. The website column is timestamptz, which reads a naive
@@ -371,6 +371,7 @@ def sanitize_report(report: dict) -> dict:
         "in_game_result": _in_game_result_block(report),
         "key_moments": _key_moments_block(se, names_by_id),
         "progression": _progression_block(se, names_by_id),
+        "plays": _plays_block(se, names_by_id),
         "player_halves": _player_halves_block(report),
         "kill_streaks": _kill_streaks_block(report),
         "weapon_sides": _weapon_sides_block(report),
@@ -510,6 +511,64 @@ def _key_moments_block(se: dict, names_by_id: dict) -> dict:
                 ],
             }
             for w in hw.get("windows") or []
+        ],
+    }
+
+
+def _play(p: dict, names_by_id: dict) -> dict:
+    exc = p.get("excursion")
+    return {
+        "rank": p.get("rank"),
+        "name": _name(p.get("player_name_at_match")) or names_by_id.get(p.get("player_id")),
+        "team": p.get("team"),
+        "side": p.get("side"),
+        "half": p.get("half"),
+        "start": _num(p.get("start")),
+        "end": _num(p.get("end")),
+        "duration": _num(p.get("duration")),
+        "peak_at": _num(p.get("peak_at")),
+        "value": _num(p.get("value")),
+        "event_value": _num(p.get("event_value")),
+        "exposure": _num(p.get("exposure")),
+        "kills": _num(p.get("kills")),
+        "deaths": _num(p.get("deaths")),
+        "caps": _num(p.get("caps")),
+        "capout_denials": _num(p.get("capout_denials")),
+        "excursion": None if not exc else {
+            "duration": _num(exc.get("duration")),
+            "min_teammate_distance": _num(exc.get("min_teammate_distance")),
+            "closest_flag": exc.get("closest_flag"),
+            "closest_flag_distance": _num(exc.get("closest_flag_distance")),
+        },
+        "tags": list(p.get("tags") or []),
+        "summary": p.get("summary"),
+    }
+
+
+def _plays_block(se: dict, names_by_id: dict) -> dict:
+    """Public form of shadow_explorations.plays: each player's best two or
+    three plays and the match's top three. The dunce (the worst play) stays
+    in the private block by decision (2026-09-19): it names a player for
+    their worst moment, and it is kept for an end-of-season reel, not the
+    match page. Names only; distances and depths are aggregates, never
+    coordinates. A report built before schema 18 has none and reads
+    unavailable."""
+    pl = se.get("plays") or {}
+    return {
+        "status": pl.get("status") or "unavailable",
+        "definition": pl.get("definition"),
+        "definition_version": pl.get("definition_version"),
+        "parameters": dict(pl.get("parameters") or {}),
+        "caveats": list(pl.get("caveats") or []),
+        "plays_total": _num(pl.get("plays_total")),
+        "match_top": [_play(p, names_by_id) for p in pl.get("match_top") or []],
+        "per_player": [
+            {
+                "name": _name(row.get("player_name_at_match")) or names_by_id.get(row.get("player_id")),
+                "team": row.get("team"),
+                "plays": [_play(p, names_by_id) for p in row.get("plays") or []],
+            }
+            for row in pl.get("per_player") or []
         ],
     }
 

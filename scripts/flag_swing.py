@@ -15,7 +15,10 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
+
+CREDIT_JOIN_TOLERANCE_SECONDS = 3.0
 
 
 @dataclass
@@ -58,6 +61,22 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _wall_seconds(value: Any) -> float | None:
+    """A capture/flag event_time as seconds, or None when it is not a
+    timestamp (fixtures use opaque strings)."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+        try:
+            return datetime.strptime(text, fmt).timestamp()
+        except ValueError:
+            continue
+    return None
 
 
 def sides_by_half(life_boundaries: Sequence[dict[str, Any]] | None,
@@ -106,6 +125,9 @@ class _HalfState:
     def alive_count(self, team: int) -> int:
         return sum(1 for pid, up in self.alive.items()
                    if up and self.teams.get(pid) == team)
+
+    def flags_held(self, team: int) -> int:
+        return sum(1 for owner in self.owners.values() if owner == team)
 
 
 def build_flag_swing_shadow(
@@ -206,13 +228,31 @@ def build_flag_swing_shadow(
             events.append((at, order, half, "spawn", row))
     events.sort(key=lambda item: (item[2], item[0], item[1]))
 
-    caps_by_key: dict[tuple[int, Any, Any], list[int]] = {}
+    # Credits join a flag transition by half + flag + wall clock. The two
+    # tables are written by different paths and disagree by a second on real
+    # matches (state 21:49:44, credit 21:49:43 on 1789348403-ATL2), so the
+    # match is nearest-within-tolerance, not exact; rows whose event_time is
+    # not a timestamp (fixtures) still join on equality.
+    credits_by_flag: dict[tuple[int | None, Any], list[tuple[Any, int]]] = {}
     for row in capture_events or []:
-        key = (_int_or_none(row.get("half")), row.get("flag_name"),
-               row.get("event_time"))
         pid = _int_or_none(row.get("player_id"))
         if pid is not None:
-            caps_by_key.setdefault(key, []).append(pid)
+            credits_by_flag.setdefault(
+                (_int_or_none(row.get("half")), row.get("flag_name")), []
+            ).append((row.get("event_time"), pid))
+
+    def _credited(half: int, flag_name: Any, event_time: Any) -> list[int]:
+        rows = credits_by_flag.get((half, flag_name), [])
+        stamp = _wall_seconds(event_time)
+        out: list[int] = []
+        for at, pid in rows:
+            other = _wall_seconds(at)
+            if stamp is not None and other is not None:
+                if abs(other - stamp) <= CREDIT_JOIN_TOLERANCE_SECONDS:
+                    out.append(pid)
+            elif at == event_time:
+                out.append(pid)
+        return out
 
     swing_by_player: dict[int, float] = {pid: 0.0 for pid in teams}
     frag_count: dict[int, int] = {pid: 0 for pid in teams}
@@ -234,6 +274,13 @@ def build_flag_swing_shadow(
             owner = _int_or_none(row.get("owner_team"))
             is_initial_row = bool(row.get("is_initial"))
             reconstructed = flag in spawn_ownership
+            # A cap that takes a flag from a side holding all but one is the
+            # cap-out denial: the loser was one flag from ending the round.
+            loser = 2 if owner == 1 else 1 if owner == 2 else None
+            capout_denied = bool(
+                loser is not None and not is_initial_row
+                and state.owners.get(flag) == loser
+                and state.flags_held(loser) == state.flag_count - 1)
             if not (is_initial_row and reconstructed):
                 # Collection's own is_initial=1 row is near-always a wrong
                 # "neutral" for a flag we have a trusted reconstructed
@@ -242,8 +289,7 @@ def build_flag_swing_shadow(
                 # (is_initial=0) arrives.
                 state.owners[flag] = owner if owner in (1, 2) else 0
             delta = state.p_allies() - before
-            credited = caps_by_key.get(
-                (half, row.get("flag_name"), row.get("event_time")), [])
+            credited = _credited(half, row.get("flag_name"), row.get("event_time"))
             share = delta / len(credited) if credited else 0.0
             for pid in credited:
                 if pid in swing_by_player:
@@ -253,6 +299,10 @@ def build_flag_swing_shadow(
                 timeline.append({
                     "half": half, "game_time": at, "kind": "flag",
                     "flag_index": flag, "owner": owner,
+                    "credited": [pid for pid in credited if pid in swing_by_player],
+                    "allies_flags": state.flags_held(1),
+                    "axis_flags": state.flags_held(2),
+                    "capout_denied": capout_denied,
                     "p_allies_after": round(state.p_allies(), 4),
                     "delta": round(delta, 4),
                 })
