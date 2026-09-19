@@ -13,6 +13,14 @@
 #
 # On a FRESH install, comment the job line out and check DRY_RUN=1 output first:
 # the first run deletes everything back to the retention horizon in one go.
+# UPLOAD SWEEP HELD since 2026-08-16 (operator: retain all evidence bundles).
+# This line exists on the data server and did NOT exist here, so restoring this
+# file from the repo removed the hold and let the script fall back to its 60d
+# default. That is not hypothetical: the sweep ran nightly from 07-03 and nulled
+# zip_path for 43 sessions (04-25 -> 06-15). The bundles themselves survive on the
+# provider-diverse mirrors, so the cost is recovery work, not lost evidence -- but
+# the API cannot reparse a session whose zip_path is NULL until both are restored.
 SHELL=/bin/bash
+UPLOAD_RETENTION_DAYS=36500
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 40 4 * * * root /usr/local/bin/ktp-ac-retention.sh >> /var/log/ktp-ac-retention.log 2>&1
