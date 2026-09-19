@@ -75,3 +75,25 @@ queries documented in the research notes.
 When the Steam bridge file is absent (as in CI), `run_weekly.py` keys ratings
 on the website's own player ids instead, so no Steam identifiers are ever
 needed in the repo.
+
+## Momentum credit (research, 2026-09-19)
+
+`momentum.py` is a deposit/payout ledger over a half's multikills, caps and
+capouts: every momentum event pays out to the team's outstanding deposits
+(attributable share from a fitted lag-lift curve, one curve per objective
+kind) and deposits itself, forwarding a fitted fraction `rho` of later
+payouts upstream — the hockey secondary assist, so a 4k → cap → capout
+chain traces back to the 4k. An enemy cap clears the ledger. Kills earn
+nothing here (KTPR has them); this is objective lift only, so it can be
+added to the KTPR components without double counting.
+
+```bash
+python momentum_fetch.py     # ssh read of officials + 12mans with flag events -> data/events/*.tsv
+python momentum_report.py    # fit curves, run the ledger -> momentum_report.md
+```
+
+Nothing is hand-picked: `lag_lift` measures P(objective within d of a
+multikill) against the same team's own rate in that half, `fit_lift` fits
+`1 + A·exp(−λd)`, `conditional_lift` gives `rho`. Not yet a KTPR component;
+rerun weekly and compare the officials-only tables with the 12man fit as
+the season fills in (thunder rarely capouts; lennon/harrington do).
