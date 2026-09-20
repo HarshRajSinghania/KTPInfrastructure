@@ -197,3 +197,38 @@ def test_ktpr_config_validation():
         KtprV2Config(swing_weight=-1.0).validate()
     with pytest.raises(ValueError):
         KtprV2Config(0.0, 0.0, 0.0, 0.0).validate()
+
+
+def test_flag_rows_carry_cappers_counts_and_the_capout_denial():
+    # Five flags. Axis takes four (indices 1-4); Allies then steal index 4
+    # back while Axis is one flag from a cap-out: that row is the denial.
+    states = [flag_state(1, 0, 1, 5.0, name="F0")]
+    states += [flag_state(1, i, 2, 10.0 + i, name=f"F{i}") for i in (1, 2, 3, 4)]
+    states.append(flag_state(1, 4, 1, 60.0, name="F4"))
+    caps = [{"half": 1, "flag_name": "F4", "event_time": "t60.0", "player_id": 2}]
+    result = build_flag_swing_shadow(states, [], [], caps, ROSTER)
+    rows = result["timeline"]
+    assert [r["credited"] for r in rows[:5]] == [[]] * 5
+    assert rows[4]["axis_flags"] == 4 and rows[4]["allies_flags"] == 1
+    assert all(r["capout_denied"] is False for r in rows[:5])
+    steal = rows[5]
+    assert steal["credited"] == [2] and steal["capout_denied"] is True
+    assert steal["axis_flags"] == 3 and steal["allies_flags"] == 2 and steal["delta"] > 0
+
+
+def test_a_steal_when_the_enemy_is_not_one_flag_out_is_not_a_denial():
+    states = [flag_state(1, 1, 2, 10.0, name="F1"), flag_state(1, 1, 1, 20.0, name="F1")]
+    result = build_flag_swing_shadow(states, [], [], [], ROSTER)
+    assert result["timeline"][1]["capout_denied"] is False
+
+
+def test_credits_join_the_transition_within_a_few_seconds_of_wall_clock():
+    # The state row is stamped one second after the credit row, as on real
+    # matches (different writers). The exact-string join used to miss it.
+    states = [dict(flag_state(1, 0, 1, 30.0, name="A"), event_time="2026-09-13 21:49:44")]
+    caps = [{"half": 1, "flag_name": "A", "event_time": "2026-09-13 21:49:43", "player_id": 1},
+            {"half": 1, "flag_name": "A", "event_time": "2026-09-13 21:50:30", "player_id": 2}]
+    result = build_flag_swing_shadow(states, [], [], caps, ROSTER)
+    assert result["timeline"][0]["credited"] == [1]
+    players = {p["player_id"]: p for p in result["players"]}
+    assert players[1]["attributed_swing"] > 0 and players[2]["attributed_swing"] == 0.0

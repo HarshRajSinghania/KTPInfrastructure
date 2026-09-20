@@ -15,6 +15,7 @@ meaning is not obvious from their names.
 | `analytics-report-dto-v1.3.0` | 12 | Adds `score`, `points_per_minute`, `grenade_kills`, `grenade_damage`, `grenade_damage_taken` to `teams[]`, `players[]` and `player_halves.rows[]`; `map_profiles` (season aggregate) adds `kills_per_minute` and `points_per_minute` |
 | `analytics-report-dto-v1.4.0` | 16 | Adds top-level `key_moments`: the match's highlight windows ranked on flag swing, names only |
 | `analytics-report-dto-v1.5.0` | 17 | Adds top-level `progression` (cumulative per-player series per half: kills, deaths, damage; per-team flag differential) and `box_score_scale` (fill-bar denominators and match-best names per `players[]` field) |
+| `analytics-report-dto-v1.6.0` | 18 | Adds top-level `plays` (each player's best plays and the match's top three; the worst play — the dunce — is computed but stays private), valued on `flag_swing_v1` with excursions from positions. `flag_swing` cap credit now joins per-credit rows within ±3 s of wall clock; caps had been uncredited in every production report before this |
 
 Minor versions only add keys. A consumer that matches the
 `analytics-report-dto-v1.` prefix keeps working; one that needs the new blocks
@@ -161,6 +162,47 @@ carries no ids, no positions, and no per-kill detail.
 Ranking is on uncalibrated `flag_swing_v1` deltas, so order is comparative,
 not absolute. A window longer than `max_len` is centred on its peak event
 rather than truncated from the start.
+
+## `plays` (v1.6.0)
+
+`definition: plays_v1`. Each player's two or three most valuable plays and
+the match's top three. The dunce — the single worst decision of the match —
+is computed in the private block and deliberately **not published**: it is
+end-of-season material, not a match-page label.
+`key_moments` answers "what were the big moments"; this answers "what did each
+player do that mattered". Same currency (`flag_swing_v1` deltas, signed from
+the player's side: kills and credited caps for them, their own deaths against
+them), plus one thing the timeline cannot see: **excursions** — stretches of a
+life spent alone behind the enemy's lines, from position samples — which
+become plays of their own, merged with whatever events fall inside them and
+charged an exposure cost for the time the team played a man down
+(`parameters.absence_rate` per minute).
+
+| Key | Meaning |
+|---|---|
+| `status` | `available` / `unavailable` (flag swing unavailable or timeline empty). Excursions missing (no positions, replay mode) leaves plays available without excursion-based entries. |
+| `definition`, `definition_version`, `parameters`, `caveats` | As run: `merge_gap`, `excursion_slack`, `absence_rate`, `per_player`, `match_top`, `dunce_floor`, `sneak_seconds`, `attempt_distance`; `valuer: flag_swing_v1` |
+| `plays_total` | Plays built before ranking (positive and negative) |
+| `match_top[]` | The `match_top` highest-value plays across all players, `rank` 1..n |
+| `per_player[]` | `name`, `team`, `plays[]` — that player's positive-value plays, best first, at most `per_player`; empty when they have none |
+| play | `name`, `team` (report team), `side` (engine side that half), `half`, `start`/`end`/`duration`/`peak_at` (game seconds), `value` (= `event_value` + `exposure`), `kills`, `deaths`, `caps`, `capout_denials`, `excursion` (`duration`, `min_teammate_distance`, `closest_flag`, `closest_flag_distance` — or `null`), `tags`, `summary` |
+| `tags` | `cap`, `solo cap`, `sneak cap` (excursion ≥ `sneak_seconds` before the touch), `cap-out denial` (the flag was taken from a side holding all but one), `Nk` (N ≥ 3), `collapse` (excursion with ≥2 kills, no cap), `attempt` (excursion within `attempt_distance` of a rear flag, no cap), `loiter` (excursion, nothing), `death`, `died for nothing` |
+
+Values are comparative, not absolute, and today a kill is worth far less than a
+cap (the baseline's alive term divides by the full roster), so cap plays
+dominate. The deposit/payout momentum ledger and counterfactual denial pricing
+(coordination workstream `infra-hidden-value-plays`) are the intended upgrade:
+they change the numbers and the ranking, not the shape of this block.
+
+The private `shadow_explorations.plays.dunce` (the worst play: by preference a
+wasted excursion that took no flag, else a death costing more than
+`dunce_floor`) exists for an end-of-season reel. Do not surface it per match.
+
+## Reports built before schema 18
+
+`plays` reads `unavailable`; `key_moments` and everything older is unchanged.
+Reports regenerated at schema 18 also carry corrected `ratings.flag_swing`
+player credit for caps (see the version table).
 
 ## `progression` (v1.5.0)
 

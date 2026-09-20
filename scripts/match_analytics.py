@@ -53,6 +53,8 @@ from scripts.flag_fights import (  # noqa: E402
     build_flag_fight_shadow,
 )
 from scripts.highlight_windows import build_highlight_windows  # noqa: E402
+from scripts.excursions import build_excursions  # noqa: E402
+from scripts.plays import build_plays  # noqa: E402
 from scripts.progression import build_progression  # noqa: E402
 from scripts.flag_swing import (  # noqa: E402
     build_flag_swing_shadow,
@@ -93,7 +95,7 @@ from scripts.side_splits import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SQL_DIR = REPO / "sql" / "analytics"
-SCHEMA_VERSION = 17  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time; 15: aim shadow (computed placement + AC on-hit precision); 16: shadow_explorations.highlight_windows (key moments ranked on flag_swing); 17: shadow_explorations.progression (cumulative per-player series per half)
+SCHEMA_VERSION = 18  # 9: spatial_layers; 10: in_game_result + player_halves; 11: kill_streaks + side/class splits; 12: objective score + grenade damage/kills, per-team and per-minute rates; 13: wave 1/2 player facts (damage_applied, life shots, score attribution) + duel_stats; 14: grenade throws + flight time; 15: aim shadow (computed placement + AC on-hit precision); 16: shadow_explorations.highlight_windows (key moments ranked on flag_swing); 17: shadow_explorations.progression (cumulative per-player series per half); 18: shadow_explorations.excursions + plays (per-player top plays, match top three, dunce)
 # The health streams EVERY producer contract emits, schema 21 onward. All of
 # these must appear exactly once per half; a missing one means that stream went
 # dark, which is the defect this list exists to catch.
@@ -1999,11 +2001,16 @@ def build_report(
     spawn_ownership = (load_spawn_ownership(
         DEFAULT_SPAWN_OWNERSHIP, str(match.get("map_name") or ""))
         if match else None)
+    # Per-credit rows with a wall clock: the aggregated capture_events feed
+    # names no player, which left every cap uncredited in flag_swing.
+    credit_timeline = (
+        query_rows(db, "capture_credit_timeline_fact.sql", match_id)
+        if sources.get("capture_credits", True) else [])
     flag_swing = build_flag_swing_shadow(
         flag_states if sources.get("flag_ownership", False) else None,
         frag_context,
         life_boundaries,
-        events,
+        credit_timeline,
         players_public,
         None,
         source_available=bool(
@@ -2021,6 +2028,20 @@ def build_report(
     highlight_windows = build_highlight_windows(
         flag_swing.get("timeline"),
         players_public,
+        source_status=flag_swing.get("status"),
+    )
+    excursions = build_excursions(
+        position_timeline, flag_positions, life_boundaries, flag_states,
+        source_available=bool(
+            sources.get("positions", False)
+            and sources.get("life_boundaries", False)
+            and source_mode != "replay"),
+    )
+    plays = build_plays(
+        flag_swing.get("timeline"),
+        players_public,
+        life_boundaries,
+        excursions.get("rows"),
         source_status=flag_swing.get("status"),
     )
     progression = build_progression(
@@ -2178,6 +2199,8 @@ def build_report(
             "flag_swing": flag_swing,
             "ktpr_v2": ktpr_v2,
             "highlight_windows": highlight_windows,
+            "excursions": excursions,
+            "plays": plays,
             "progression": progression,
             "weapon_engagement": build_weapon_engagement_shadow(
                 frag_context if frag_context is not None else frag_timeline,
